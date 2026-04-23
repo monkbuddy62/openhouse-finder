@@ -106,38 +106,22 @@ def run(neighborhood, slow_mo=700):
         page.wait_for_load_state('domcontentloaded')
         page.wait_for_timeout(2200)
 
-        # ── Open House filter ────────────────────────────────────────────────
+        # ── Apply Open House filter via URL ──────────────────────────────────
+        # Redfin encodes filters in the URL path — more reliable than clicking buttons.
         print('Applying Open House filter...')
-        applied = False
+        current_url = page.url
+        print(f'  Current URL: {current_url}')
 
-        # Try a top-level "Open Houses" button first (sometimes visible without opening filter panel)
-        for btn_text in ['Open Houses', 'Open House']:
-            try:
-                page.get_by_role('button', name=btn_text).first.click(timeout=4000)
-                applied = True
-                break
-            except Exception:
-                pass
+        if 'open-house' not in current_url:
+            if '/filter/' in current_url:
+                filtered_url = current_url.replace('/filter/', '/filter/open-house-3day,')
+            else:
+                filtered_url = current_url.rstrip('/') + '/filter/open-house-3day'
+            print(f'  Navigating to: {filtered_url}')
+            page.goto(filtered_url, wait_until='domcontentloaded')
+        else:
+            print('  Open house filter already active')
 
-        if not applied:
-            # Open the full filter panel and look inside
-            try:
-                page.locator('[data-rf-test-name="filterButton"], button:has-text("Filters"), button:has-text("Filter")').first.click(timeout=6000)
-                page.wait_for_timeout(900)
-                page.get_by_text('Open Houses', exact=False).first.click(timeout=5000)
-                # Apply / Done button
-                for done in ['Apply', 'Done', 'See homes']:
-                    try:
-                        page.get_by_role('button', name=done).first.click(timeout=3000)
-                        break
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f'  Warning: could not auto-apply filter ({e})')
-                print('  Please apply the Open Houses filter manually in the browser, then press Enter.')
-                input()
-
-        page.wait_for_load_state('domcontentloaded')
         page.wait_for_timeout(2500)
 
         # ── Scroll to load all cards ─────────────────────────────────────────
