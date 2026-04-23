@@ -9,18 +9,19 @@ Usage:
     python main.py              # will prompt you
 """
 
+import re
 import sys
 import sqlite3
 import argparse
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 DB_FILE = 'openhouses.db'
 
-# Injected into every page before any scripts run — removes the most common
-# bot-detection signals that sites check for.
+DAY_ORDER = {'MON': 0, 'TUE': 1, 'WED': 2, 'THU': 3, 'FRI': 4, 'SAT': 5, 'SUN': 6}
+
 STEALTH_JS = """
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     Object.defineProperty(navigator, 'plugins',   { get: () => [1,2,3,4,5] });
@@ -35,19 +36,16 @@ STEALTH_JS = """
 
 
 def pause(min_s=1.5, max_s=3.5):
-    """Random human-paced sleep."""
     time.sleep(random.uniform(min_s, max_s))
 
 
-def long_pause(min_s=4.0, max_s=9.0):
-    """Occasional longer break so the request pattern doesn't look robotic."""
+def long_pause(min_s=4.0, max_s=9.0, log=print):
     secs = random.uniform(min_s, max_s)
-    print(f'  (pausing {secs:.0f}s…)')
+    log(f'  (pausing {secs:.0f}s…)')
     time.sleep(secs)
 
 
 def human_scroll(page):
-    """Scroll in random increments to mimic a person reading down the page."""
     total = page.evaluate('document.body.scrollHeight')
     pos   = 0
     while pos < total:
@@ -55,15 +53,12 @@ def human_scroll(page):
         pos  = min(pos + step, total)
         page.evaluate(f'window.scrollTo(0, {pos})')
         time.sleep(random.uniform(0.08, 0.25))
-    # Pause at the bottom as if reading
     pause(1.0, 2.5)
-    # Scroll back up a little — real users do this
     page.evaluate(f'window.scrollTo(0, {int(total * random.uniform(0.7, 0.9))})')
     pause(0.5, 1.2)
 
 
 def scroll_for_cards(page):
-    """Scroll repeatedly until no new listing cards appear (infinite scroll)."""
     prev = 0
     for _ in range(30):
         human_scroll(page)
@@ -84,9 +79,18 @@ def init_db():
             open_date   TEXT,
             open_time   TEXT,
             listing_url TEXT UNIQUE,
-            scraped_at  TEXT
+            scraped_at  TEXT,
+            excluded    INTEGER DEFAULT 0,
+            lat         REAL,
+            lng         REAL
         )
     ''')
+    # Migrate existing DBs that predate these columns
+    for col, defn in [('excluded', 'INTEGER DEFAULT 0'), ('lat', 'REAL'), ('lng', 'REAL')]:
+        try:
+            conn.execute(f'ALTER TABLE openhouses ADD COLUMN {col} {defn}')
+        except Exception:
+            pass
     conn.commit()
     return conn
 
@@ -105,7 +109,6 @@ def upsert(conn, row):
 
 
 def dismiss_popups(page):
-    """Close any modal or overlay that might be blocking the page."""
     selectors = [
         'button[aria-label="Close"]',
         'button[aria-label="close"]',
@@ -129,29 +132,56 @@ def dismiss_popups(page):
 
 
 def address_from_url(url):
-    """Parse a human-readable address out of a Redfin listing URL.
-    Handles both /street/home/id and /street/unit-X/home/id patterns.
+    """Redfin URLs: /STATE/CITY/[neighborhood/]STREET/[unit-X/]home/ID
+    State is always segment index 3, city always index 4.
     """
     parts = url.rstrip('/').split('/')
     try:
         home_idx = parts.index('home')
+        state = parts[3]
+        city  = parts[4]
         street_part = parts[home_idx - 1]
-        # If the segment before 'home' looks like a unit (unit-A, unit-3C…), back up one more
         if street_part.lower().startswith('unit'):
-            unit    = street_part.replace('-', ' ')
-            raw     = parts[home_idx - 2]
-            city    = parts[home_idx - 3]
-            state   = parts[home_idx - 4]
-            return f'{raw.replace("-", " ")}, {unit}, {city}, {state}'
+            unit   = street_part.replace('-', ' ')
+            street = parts[home_idx - 2].replace('-', ' ')
+            return f'{street}, {unit}, {city}, {state}'
         else:
-            city  = parts[home_idx - 2]
-            state = parts[home_idx - 3]
-            return f'{street_part.replace("-", " ")}, {city}, {state}'
+            street = street_part.replace('-', ' ')
+            return f'{street}, {city}, {state}'
     except Exception:
         return url
 
 
-def run(neighborhood, slow_mo=0):
+def parse_badge(text):
+    """'REDFIN OPEN SAT, 1–3PM' → ('SAT', '1–3PM'); 'OPEN SUN' → ('SUN', '')"""
+    if not text:
+        return '', ''
+    t = text.upper().strip()
+    if t.startswith('REDFIN '):
+        t = t[7:]
+    if t.startswith('OPEN '):
+        t = t[5:]
+    if ',' in t:
+        day, time_part = t.split(',', 1)
+        return day.strip(), time_part.strip()
+    return t.strip(), ''
+
+
+def resolve_day(day_str):
+    """Replace TODAY/TOMORROW with the actual short day name."""
+    d = day_str.upper()
+    if d == 'TODAY':
+        return datetime.now().strftime('%a').upper()
+    if d == 'TOMORROW':
+        return (datetime.now() + timedelta(days=1)).strftime('%a').upper()
+    return day_str
+
+
+def clean_agent(name):
+    return re.sub(r'[\s•·,\.]+$', '', name).strip(' •·,')
+
+
+def run(neighborhood, slow_mo=0, log=print):
     conn    = init_db()
     results = []
 
@@ -175,7 +205,6 @@ def run(neighborhood, slow_mo=0):
             locale='en-US',
             timezone_id='America/Los_Angeles',
         )
-        # Patch every page before any JS runs
         ctx.add_init_script(STEALTH_JS)
         page = ctx.new_page()
 
@@ -183,13 +212,12 @@ def run(neighborhood, slow_mo=0):
         if neighborhood.startswith('http'):
             start_url = neighborhood
         else:
-            print(f'\nSearching Redfin for: {neighborhood}')
+            log(f'Searching Redfin for: {neighborhood}')
             page.goto('https://www.redfin.com', wait_until='domcontentloaded')
             pause(2, 4)
 
             search_box = page.locator('input[placeholder*="Search"], #search-box-input').first
             search_box.wait_for(timeout=12000)
-            # Type like a human — character by character with small random delays
             for ch in neighborhood:
                 search_box.type(ch, delay=random.randint(60, 160))
             pause(1.2, 2.0)
@@ -216,22 +244,17 @@ def run(neighborhood, slow_mo=0):
             else:
                 start_url = current_url
 
-        print(f'\nGoing to: {start_url}')
+        log(f'Going to: {start_url}')
         page.goto(start_url, wait_until='domcontentloaded')
         pause(3, 5)
         dismiss_popups(page)
 
-        # ── Scroll to load all cards ─────────────────────────────────────────
-        print('Loading all listing cards...')
+        log('Loading all listing cards...')
         count = scroll_for_cards(page)
-        print(f'  Found {count} cards')
+        log(f'  Found {count} cards')
 
-        # ── Collect listing URLs + open house time from the cards ───────────
-        # The open house time badge ("OPEN SAT, 1PM TO 3PM") lives on the
-        # search result card — grab it here so we don't have to dig for it
-        # on the detail page.
         cards = page.locator('.HomeCard, [data-rf-test-name="mapHomeCard"]').all()
-        seen, listings = set(), []   # listings = list of {url, open_text}
+        seen, listings = set(), []
 
         for card in cards:
             try:
@@ -241,7 +264,6 @@ def run(neighborhood, slow_mo=0):
                 seen.add(href)
                 url = href if href.startswith('http') else 'https://www.redfin.com' + href
 
-                # Look for the open house bubble text anywhere inside the card
                 open_text = ''
                 try:
                     badge = card.locator(
@@ -253,7 +275,6 @@ def run(neighborhood, slow_mo=0):
                 except Exception:
                     pass
 
-                # Fallback: scan all text in the card for "OPEN" keyword
                 if not open_text:
                     try:
                         card_text = card.inner_text(timeout=1000)
@@ -269,18 +290,18 @@ def run(neighborhood, slow_mo=0):
                 pass
 
         random.shuffle(listings)
-        print(f'  Collected {len(listings)} unique listings\n')
+        log(f'  Collected {len(listings)} unique listings')
 
         # ── Visit each listing for agent name ───────────────────────────────
         for i, listing in enumerate(listings, 1):
             url       = listing['url']
             open_text = listing['open_text']
-            print(f'[{i}/{len(listings)}] {url}')
+            log(f'[{i}/{len(listings)}] {url}')
             if open_text:
-                print(f'  card badge: {open_text}')
+                log(f'  badge: {open_text}')
 
             if i > 1 and i % random.randint(4, 8) == 0:
-                long_pause()
+                long_pause(log=log)
 
             try:
                 page.goto(url, wait_until='domcontentloaded', timeout=30000)
@@ -292,54 +313,41 @@ def run(neighborhood, slow_mo=0):
 
                 address = address_from_url(url)
 
-                # Agent — find "Listed by" text
                 agent_name = ''
                 try:
                     block = page.locator('text=/Listed by/i').first.evaluate(
                         'el => el.closest("div,li,span,p").innerText', timeout=4000
                     )
-                    agent_name = block.replace('Listed by', '').split('\n')[0].strip(' •·,')
+                    agent_name = clean_agent(block.replace('Listed by', '').split('\n')[0])
                 except Exception:
                     pass
 
-                # Use the badge text as the open house time
-                open_date = open_text
-                open_time = ''
+                open_date, open_time = parse_badge(open_text)
+                open_date = resolve_day(open_date)
 
                 row = (address, agent_name, open_date, open_time, url, datetime.now().isoformat())
                 upsert(conn, row)
                 results.append(row)
-                print(f'  address : {address}')
-                print(f'  agent   : {agent_name or "not found"}')
-                print(f'  when    : {open_text or "(not found)"}\n')
+                log(f'  address : {address}')
+                log(f'  agent   : {agent_name or "not found"}')
+                log(f'  when    : {open_date} {open_time}'.strip() or '(not found)')
 
             except PlaywrightTimeout:
-                print('  Timed out — skipping\n')
+                log('  Timed out — skipping')
                 pause(3, 6)
             except Exception as e:
                 err = str(e)
-                print(f'  Error: {err[:120]}\n')
+                log(f'  Error: {err[:120]}')
                 if 'closed' in err.lower():
-                    print('Browser was closed — stopping early.')
+                    log('Browser was closed — stopping early.')
                     break
                 pause(3, 6)
 
         browser.close()
 
-    # ── Summary ──────────────────────────────────────────────────────────────
-    print('=' * 60)
-    print(f'  {len(results)} open houses saved to {DB_FILE}')
-    print('=' * 60)
-    rows = conn.execute(
-        'SELECT address, agent_name, open_date, open_time FROM openhouses ORDER BY open_date, open_time'
-    ).fetchall()
-    for r in rows:
-        date_time = f'{r[2]} {r[3]}'.strip()
-        print(f'  {date_time:<28}  {r[0]}')
-        if r[1]:
-            print(f'  {"":28}  Agent: {r[1]}')
-        print()
+    log(f'Done — {len(results)} listings saved.')
     conn.close()
+    return results
 
 
 if __name__ == '__main__':
@@ -356,3 +364,18 @@ if __name__ == '__main__':
         sys.exit('No input provided.')
 
     run(neighborhood, slow_mo=args.slow)
+
+    # CLI summary
+    conn = init_db()
+    rows = conn.execute(
+        'SELECT address, agent_name, open_date, open_time FROM openhouses'
+    ).fetchall()
+    rows_sorted = sorted(rows, key=lambda r: (DAY_ORDER.get(r[2].upper(), 99), r[3]))
+    print('=' * 60)
+    for r in rows_sorted:
+        date_time = f'{r[2]} {r[3]}'.strip()
+        print(f'  {date_time:<28}  {r[0]}')
+        if r[1]:
+            print(f'  {"":28}  Agent: {r[1]}')
+        print()
+    conn.close()

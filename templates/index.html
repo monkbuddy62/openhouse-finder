@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Open House Finder</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #d4d4d4;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.65rem 1rem;
+      background: #111;
+      border-bottom: 1px solid #1e3a30;
+      flex-shrink: 0;
+    }
+
+    #topbar h1 {
+      font-size: 0.85rem;
+      letter-spacing: 0.22em;
+      color: #00ffcc;
+      text-shadow: 0 0 10px rgba(0,255,200,0.5);
+      white-space: nowrap;
+    }
+
+    #urlInput {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #2a4a3a;
+      color: #ccc;
+      font-family: 'Courier New', monospace;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.65rem;
+      border-radius: 3px;
+      outline: none;
+      min-width: 0;
+    }
+    #urlInput:focus { border-color: #00ffcc44; }
+    #urlInput::placeholder { color: #444; }
+
+    button {
+      font-family: 'Courier New', monospace;
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      padding: 0.4rem 0.9rem;
+      white-space: nowrap;
+    }
+
+    #runBtn {
+      background: #00ffcc22;
+      border: 1px solid #00ffcc55;
+      color: #00ffcc;
+    }
+    #runBtn:hover { background: #00ffcc33; }
+    #runBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    #todayToggle {
+      background: transparent;
+      border: 1px solid #2a4a3a;
+      color: #aaa;
+      padding: 0.4rem 0.7rem;
+    }
+    #todayToggle.active {
+      background: #00ffcc18;
+      border-color: #00ffcc55;
+      color: #00ffcc;
+    }
+
+    #status {
+      font-size: 0.72rem;
+      color: #556;
+      white-space: nowrap;
+    }
+    #status.running { color: #ffcc44; }
+    #status.done    { color: #00ffcc; }
+    #status.error   { color: #ff5555; }
+
+    /* ── Main layout ── */
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 340px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: #111;
+      border-right: 1px solid #1e3a30;
+      overflow: hidden;
+    }
+
+    /* Progress log */
+    #logWrap {
+      flex-shrink: 0;
+      max-height: 180px;
+      overflow-y: auto;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #1a2a24;
+      display: none;
+    }
+    #logWrap.visible { display: block; }
+    #log {
+      font-size: 0.68rem;
+      color: #556;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #log .log-hi  { color: #aaa; }
+    #log .log-ok  { color: #00ffcc; }
+    #log .log-err { color: #ff5555; }
+
+    /* Listings */
+    #listingsWrap {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem 0;
+    }
+
+    .listing-card {
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid #1a2020;
+      cursor: pointer;
+      transition: background 0.12s;
+      position: relative;
+    }
+    .listing-card:hover { background: #161e1c; }
+    .listing-card.excluded { opacity: 0.35; }
+    .listing-card.today-hl { border-left: 2px solid #00ffcc; }
+    .listing-card.routed { border-left: 2px solid #ffcc44; }
+
+    .card-when {
+      font-size: 0.65rem;
+      color: #00ffcc;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.18rem;
+    }
+    .listing-card.excluded .card-when { color: #445; }
+
+    .card-address {
+      font-size: 0.75rem;
+      color: #ccc;
+      margin-bottom: 0.12rem;
+    }
+
+    .card-agent {
+      font-size: 0.65rem;
+      color: #556;
+    }
+
+    .card-route-num {
+      position: absolute;
+      top: 0.45rem;
+      right: 2rem;
+      font-size: 0.7rem;
+      color: #ffcc44;
+      font-weight: bold;
+    }
+
+    .exclude-btn {
+      position: absolute;
+      top: 0.45rem;
+      right: 0.5rem;
+      background: transparent;
+      border: none;
+      color: #334;
+      font-size: 0.8rem;
+      padding: 0 0.2rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .exclude-btn:hover { color: #ff5555; }
+    .listing-card.excluded .exclude-btn { color: #445; }
+    .listing-card.excluded .exclude-btn:hover { color: #00ffcc; }
+
+    /* Route panel */
+    #routePanel {
+      flex-shrink: 0;
+      border-top: 1px solid #1e3a30;
+      padding: 0.65rem 0.75rem;
+    }
+
+    #homeInput {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1px solid #2a4a3a;
+      color: #ccc;
+      font-family: 'Courier New', monospace;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.55rem;
+      border-radius: 3px;
+      outline: none;
+      margin-bottom: 0.5rem;
+    }
+    #homeInput:focus { border-color: #00ffcc44; }
+    #homeInput::placeholder { color: #444; }
+
+    #routeActions { display: flex; gap: 0.5rem; }
+
+    #planBtn {
+      flex: 1;
+      background: #ffcc4422;
+      border: 1px solid #ffcc4455;
+      color: #ffcc44;
+    }
+    #planBtn:hover { background: #ffcc4433; }
+    #planBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    #mapsBtn {
+      background: #1a3a2a;
+      border: 1px solid #2a5a3a;
+      color: #aaa;
+      display: none;
+    }
+    #mapsBtn:hover { color: #fff; }
+    #mapsBtn.visible { display: block; }
+
+    #routeStatus {
+      font-size: 0.68rem;
+      color: #556;
+      margin-top: 0.4rem;
+      min-height: 1rem;
+    }
+
+    /* ── Map ── */
+    #map {
+      flex: 1;
+      z-index: 0;
+    }
+
+    /* Leaflet pin number labels */
+    .pin-label {
+      background: #ffcc44;
+      color: #000;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      font-weight: bold;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #000;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a4a3a; border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>◈ OPEN HOUSE FINDER</h1>
+  <input id="urlInput" type="text" placeholder="Paste Redfin neighborhood URL…" spellcheck="false"/>
+  <button id="runBtn">RUN</button>
+  <button id="todayToggle">TODAY ONLY</button>
+  <span id="status">idle</span>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div id="logWrap"><pre id="log"></pre></div>
+    <div id="listingsWrap"></div>
+    <div id="routePanel">
+      <input id="homeInput" type="text" placeholder="Your home address…" spellcheck="false"/>
+      <div id="routeActions">
+        <button id="planBtn">PLAN ROUTE</button>
+        <button id="mapsBtn">OPEN IN MAPS ↗</button>
+      </div>
+      <div id="routeStatus"></div>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Map setup ──────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView([47.56, -122.39], 13);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO',
+  maxZoom: 19,
+}).addTo(map);
+
+// ── State ──────────────────────────────────────────────────────────────────
+let allListings   = [];
+let todayOnly     = false;
+let markers       = {};      // id → L.marker
+let routeLayer    = null;
+let routeOrder    = [];      // ordered listing ids
+let mapsUrl       = '';
+let sse           = null;
+
+const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+
+// ── Elements ───────────────────────────────────────────────────────────────
+const urlInput      = document.getElementById('urlInput');
+const runBtn        = document.getElementById('runBtn');
+const todayToggle   = document.getElementById('todayToggle');
+const statusEl      = document.getElementById('status');
+const logWrap       = document.getElementById('logWrap');
+const logEl         = document.getElementById('log');
+const listingsWrap  = document.getElementById('listingsWrap');
+const homeInput     = document.getElementById('homeInput');
+const planBtn       = document.getElementById('planBtn');
+const mapsBtn       = document.getElementById('mapsBtn');
+const routeStatus   = document.getElementById('routeStatus');
+
+// ── Run scrape ─────────────────────────────────────────────────────────────
+runBtn.addEventListener('click', async () => {
+  const url = urlInput.value.trim();
+  if (!url) return;
+
+  runBtn.disabled = true;
+  setStatus('running', 'scraping…');
+  logEl.textContent = '';
+  logWrap.classList.add('visible');
+
+  const res = await fetch('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  const json = await res.json();
+  if (json.error) {
+    setStatus('error', json.error);
+    runBtn.disabled = false;
+    return;
+  }
+
+  // Stream progress via SSE
+  if (sse) sse.close();
+  sse = new EventSource('/api/progress');
+  sse.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'ping') return;
+    if (msg.type === 'log') {
+      appendLog(msg.msg);
+    } else if (msg.type === 'done') {
+      setStatus('done', 'done');
+      runBtn.disabled = false;
+      sse.close();
+      loadListings();
+    } else if (msg.type === 'error') {
+      setStatus('error', msg.msg.slice(0, 60));
+      runBtn.disabled = false;
+      sse.close();
+      loadListings();
+    }
+  };
+});
+
+function appendLog(msg) {
+  const line = document.createElement('span');
+  if (msg.startsWith('[')) {
+    line.className = 'log-hi';
+  } else if (msg.includes('Done —') || msg.includes('address :')) {
+    line.className = 'log-ok';
+  } else if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('timed out')) {
+    line.className = 'log-err';
+  }
+  line.textContent = msg + '\n';
+  logEl.appendChild(line);
+  logWrap.scrollTop = logWrap.scrollHeight;
+}
+
+// ── Load & render listings ─────────────────────────────────────────────────
+async function loadListings() {
+  const res  = await fetch('/api/listings');
+  allListings = await res.json();
+  renderListings();
+  renderMarkers();
+}
+
+function visibleListings() {
+  if (todayOnly) return allListings.filter(l => l.open_date === today);
+  return allListings;
+}
+
+function renderListings() {
+  const list = visibleListings();
+  listingsWrap.innerHTML = '';
+
+  if (!list.length) {
+    listingsWrap.innerHTML = '<div style="padding:1rem;color:#445;font-size:0.72rem">No listings yet. Run a scrape.</div>';
+    return;
+  }
+
+  for (const l of list) {
+    const card = document.createElement('div');
+    card.className = 'listing-card' +
+      (l.excluded         ? ' excluded'  : '') +
+      (l.open_date === today ? ' today-hl' : '') +
+      (routeOrder.includes(l.id) ? ' routed' : '');
+    card.dataset.id = l.id;
+
+    const when = [l.open_date, l.open_time].filter(Boolean).join(' ');
+
+    const routeIdx = routeOrder.indexOf(l.id);
+    card.innerHTML = `
+      ${routeIdx >= 0 ? `<span class="card-route-num">#${routeIdx + 1}</span>` : ''}
+      <button class="exclude-btn" title="${l.excluded ? 'Re-include' : 'Exclude'}">${l.excluded ? '↩' : '✕'}</button>
+      <div class="card-when">${when || '—'}</div>
+      <div class="card-address">${l.address}</div>
+      ${l.agent_name ? `<div class="card-agent">Agent: ${l.agent_name}</div>` : ''}
+    `;
+
+    card.querySelector('.exclude-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleExclude(l);
+    });
+
+    card.addEventListener('click', () => {
+      if (markers[l.id]) {
+        map.setView(markers[l.id].getLatLng(), 16);
+        markers[l.id].openPopup();
+      }
+    });
+
+    listingsWrap.appendChild(card);
+  }
+}
+
+function renderMarkers() {
+  // Clear old markers
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+
+  const list = visibleListings();
+  const bounds = [];
+
+  for (const l of list) {
+    if (!l.lat || !l.lng) continue;
+
+    const routeIdx = routeOrder.indexOf(l.id);
+    const isToday  = l.open_date === today;
+    const color    = l.excluded ? '#444' : routeIdx >= 0 ? '#ffcc44' : isToday ? '#00ffcc' : '#7799aa';
+
+    let icon;
+    if (routeIdx >= 0) {
+      icon = L.divIcon({
+        className: '',
+        html: `<div class="pin-label">${routeIdx + 1}</div>`,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+    } else {
+      icon = L.circleMarker ? null : null; // use circleMarker below
+    }
+
+    let marker;
+    if (routeIdx >= 0) {
+      marker = L.marker([l.lat, l.lng], { icon });
+    } else {
+      marker = L.circleMarker([l.lat, l.lng], {
+        radius: isToday ? 7 : 5,
+        fillColor: color,
+        color: '#000',
+        weight: 1,
+        fillOpacity: l.excluded ? 0.25 : 0.85,
+      });
+    }
+
+    const when = [l.open_date, l.open_time].filter(Boolean).join(' ');
+    marker.bindPopup(`
+      <div style="font-family:monospace;font-size:12px;min-width:180px">
+        <div style="color:#00ffcc;margin-bottom:4px">${when || '—'}</div>
+        <div style="margin-bottom:3px">${l.address}</div>
+        ${l.agent_name ? `<div style="color:#888">Agent: ${l.agent_name}</div>` : ''}
+        ${l.listing_url ? `<div style="margin-top:5px"><a href="${l.listing_url}" target="_blank" style="color:#00ffcc">View on Redfin ↗</a></div>` : ''}
+      </div>
+    `);
+
+    marker.addTo(map);
+    markers[l.id] = marker;
+    bounds.push([l.lat, l.lng]);
+  }
+
+  if (bounds.length > 0) {
+    map.fitBounds(bounds, { padding: [40, 40] });
+  }
+}
+
+function drawRoute(ordered) {
+  if (routeLayer) map.removeLayer(routeLayer);
+  if (!ordered.length) return;
+  const latlngs = ordered.filter(s => s.lat && s.lng).map(s => [s.lat, s.lng]);
+  routeLayer = L.polyline(latlngs, {
+    color: '#ffcc44',
+    weight: 2.5,
+    opacity: 0.7,
+    dashArray: '6 4',
+  }).addTo(map);
+}
+
+// ── Exclude / include ──────────────────────────────────────────────────────
+async function toggleExclude(listing) {
+  const newVal = listing.excluded ? 0 : 1;
+  await fetch('/api/exclude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: listing.id, excluded: newVal }),
+  });
+  listing.excluded = newVal;
+  // Clear route if we changed something
+  routeOrder = [];
+  mapsBtn.classList.remove('visible');
+  mapsUrl = '';
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  renderListings();
+  renderMarkers();
+}
+
+// ── Today toggle ───────────────────────────────────────────────────────────
+todayToggle.addEventListener('click', () => {
+  todayOnly = !todayOnly;
+  todayToggle.classList.toggle('active', todayOnly);
+  renderListings();
+  renderMarkers();
+});
+
+// ── Plan route ─────────────────────────────────────────────────────────────
+planBtn.addEventListener('click', async () => {
+  const homeAddr = homeInput.value.trim();
+  if (!homeAddr) { routeStatus.textContent = 'Enter your home address first.'; return; }
+
+  planBtn.disabled = true;
+  routeStatus.textContent = 'Geocoding addresses…';
+
+  // Geocode home
+  const homeRes  = await fetch('/api/geocode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address: homeAddr }),
+  });
+  const homeCoords = await homeRes.json();
+  if (homeCoords.error) {
+    routeStatus.textContent = 'Could not find your home address.';
+    planBtn.disabled = false;
+    return;
+  }
+
+  // Collect non-excluded listings that are visible and have a real address
+  const candidates = visibleListings().filter(l => !l.excluded);
+  if (!candidates.length) {
+    routeStatus.textContent = 'No eligible listings to route.';
+    planBtn.disabled = false;
+    return;
+  }
+
+  routeStatus.textContent = `Optimizing route for ${candidates.length} stops…`;
+
+  const routeRes = await fetch('/api/route', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      home: { ...homeCoords, address: homeAddr },
+      ids: candidates.map(l => l.id),
+    }),
+  });
+  const routeData = await routeRes.json();
+
+  planBtn.disabled = false;
+
+  if (routeData.error) {
+    routeStatus.textContent = routeData.error;
+    return;
+  }
+
+  routeOrder = routeData.route.map(s => s.id);
+  mapsUrl    = routeData.maps_url;
+
+  // Merge geocoded coords back into allListings
+  for (const s of routeData.route) {
+    const l = allListings.find(x => x.id === s.id);
+    if (l) { l.lat = s.lat; l.lng = s.lng; }
+  }
+
+  routeStatus.textContent = `Route: ${routeOrder.length} stops`;
+  mapsBtn.classList.add('visible');
+
+  drawRoute(routeData.route);
+  renderListings();
+  renderMarkers();
+});
+
+mapsBtn.addEventListener('click', () => {
+  if (mapsUrl) window.open(mapsUrl, '_blank');
+});
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function setStatus(cls, text) {
+  statusEl.className = cls;
+  statusEl.textContent = text;
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadListings();
+</script>
+</body>
+</html>
