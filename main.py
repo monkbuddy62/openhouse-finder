@@ -104,15 +104,49 @@ def upsert(conn, row):
     conn.commit()
 
 
+def dismiss_popups(page):
+    """Close any modal or overlay that might be blocking the page."""
+    selectors = [
+        'button[aria-label="Close"]',
+        'button[aria-label="close"]',
+        'button[aria-label="Dismiss"]',
+        '[data-rf-test-name="modal-close-button"]',
+        '.modal-close-button',
+        'button.close',
+        'button:has-text("✕")',
+        'button:has-text("×")',
+        'button:has-text("No thanks")',
+        'button:has-text("Not now")',
+    ]
+    for sel in selectors:
+        try:
+            btn = page.locator(sel).first
+            if btn.is_visible(timeout=600):
+                btn.click()
+                time.sleep(0.4)
+        except Exception:
+            pass
+
+
 def address_from_url(url):
-    """Parse a human-readable address out of a Redfin listing URL."""
+    """Parse a human-readable address out of a Redfin listing URL.
+    Handles both /street/home/id and /street/unit-X/home/id patterns.
+    """
     parts = url.rstrip('/').split('/')
     try:
         home_idx = parts.index('home')
-        raw   = parts[home_idx - 1]   # e.g. "1241-SW-Myrtle-St-98106"
-        city  = parts[home_idx - 2]   # e.g. "Seattle"
-        state = parts[home_idx - 3]   # e.g. "WA"
-        return f'{raw.replace("-", " ")}, {city}, {state}'
+        street_part = parts[home_idx - 1]
+        # If the segment before 'home' looks like a unit (unit-A, unit-3C…), back up one more
+        if street_part.lower().startswith('unit'):
+            unit    = street_part.replace('-', ' ')
+            raw     = parts[home_idx - 2]
+            city    = parts[home_idx - 3]
+            state   = parts[home_idx - 4]
+            return f'{raw.replace("-", " ")}, {unit}, {city}, {state}'
+        else:
+            city  = parts[home_idx - 2]
+            state = parts[home_idx - 3]
+            return f'{street_part.replace("-", " ")}, {city}, {state}'
     except Exception:
         return url
 
@@ -185,6 +219,7 @@ def run(neighborhood, slow_mo=0):
         print(f'\nGoing to: {start_url}')
         page.goto(start_url, wait_until='domcontentloaded')
         pause(3, 5)
+        dismiss_popups(page)
 
         # ── Scroll to load all cards ─────────────────────────────────────────
         print('Loading all listing cards...')
@@ -218,7 +253,8 @@ def run(neighborhood, slow_mo=0):
 
             try:
                 page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                pause(2.5, 5.0)   # random read time before scraping
+                pause(2.5, 5.0)
+                dismiss_popups(page)
 
                 # Scroll a bit as if reading the page
                 page.evaluate(f'window.scrollTo(0, {random.randint(200, 600)})')
@@ -227,16 +263,24 @@ def run(neighborhood, slow_mo=0):
                 address = address_from_url(url)
 
                 # Open house date / time
+                # The page has a heading "Open house schedule" then the actual times below it.
+                # We grab the whole section and filter out the heading line.
                 open_date = open_time = ''
                 try:
-                    oh_text = page.locator('text=/Open House/i').first.evaluate(
-                        'el => el.closest("div,li,span,section").innerText', timeout=4000
-                    ).strip()
-                    if '·' in oh_text:
-                        d, t = oh_text.split('·', 1)
-                        open_date, open_time = d.strip(), t.strip()
-                    elif oh_text:
-                        open_date = oh_text[:80]
+                    section_text = page.locator('text=/Open House/i').first.evaluate(
+                        'el => el.closest("section,div,article,li").innerText', timeout=4000
+                    )
+                    lines = [
+                        l.strip() for l in section_text.split('\n')
+                        if l.strip() and 'open house' not in l.strip().lower()
+                    ]
+                    if lines:
+                        oh_line = lines[0]
+                        if '·' in oh_line:
+                            d, t = oh_line.split('·', 1)
+                            open_date, open_time = d.strip(), t.strip()
+                        else:
+                            open_date = oh_line[:80]
                 except Exception:
                     pass
 
