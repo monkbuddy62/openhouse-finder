@@ -79,14 +79,20 @@ def init_db():
             open_date   TEXT,
             open_time   TEXT,
             listing_url TEXT UNIQUE,
-            scraped_at  TEXT,
-            excluded    INTEGER DEFAULT 0,
-            lat         REAL,
-            lng         REAL
+            scraped_at   TEXT,
+            excluded     INTEGER DEFAULT 0,
+            lat          REAL,
+            lng          REAL,
+            scraped_week TEXT
         )
     ''')
     # Migrate existing DBs that predate these columns
-    for col, defn in [('excluded', 'INTEGER DEFAULT 0'), ('lat', 'REAL'), ('lng', 'REAL')]:
+    for col, defn in [
+        ('excluded',     'INTEGER DEFAULT 0'),
+        ('lat',          'REAL'),
+        ('lng',          'REAL'),
+        ('scraped_week', 'TEXT'),
+    ]:
         try:
             conn.execute(f'ALTER TABLE openhouses ADD COLUMN {col} {defn}')
         except Exception:
@@ -96,15 +102,17 @@ def init_db():
 
 
 def upsert(conn, row):
+    week = datetime.now().strftime('%G-W%V')
     conn.execute('''
-        INSERT INTO openhouses (address, agent_name, open_date, open_time, listing_url, scraped_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO openhouses (address, agent_name, open_date, open_time, listing_url, scraped_at, scraped_week)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(listing_url) DO UPDATE SET
-            agent_name = excluded.agent_name,
-            open_date  = excluded.open_date,
-            open_time  = excluded.open_time,
-            scraped_at = excluded.scraped_at
-    ''', row)
+            agent_name   = excluded.agent_name,
+            open_date    = excluded.open_date,
+            open_time    = excluded.open_time,
+            scraped_at   = excluded.scraped_at,
+            scraped_week = excluded.scraped_week
+    ''', row + (week,))
     conn.commit()
 
 

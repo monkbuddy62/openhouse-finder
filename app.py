@@ -91,7 +91,7 @@ def api_listings():
     try:
         conn = get_db()
         rows = conn.execute(
-            'SELECT id, address, agent_name, open_date, open_time, listing_url, excluded, lat, lng '
+            'SELECT id, address, agent_name, open_date, open_time, listing_url, excluded, lat, lng, scraped_week '
             'FROM openhouses'
         ).fetchall()
         conn.close()

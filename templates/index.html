@@ -5,93 +5,139 @@
   <title>Open House Finder</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
+    /* ── CSS custom properties — dark (default) ── */
+    :root {
+      --bg:          #0d0d0d;
+      --surface:     #111111;
+      --surface2:    #161c1a;
+      --border:      #1e3a30;
+      --border2:     #1a2520;
+      --text:        #d4d4d4;
+      --text-dim:    #778;
+      --text-mute:   #445;
+      --accent:      #00ffcc;
+      --accent-bg:   rgba(0,255,204,0.10);
+      --accent-bdr:  rgba(0,255,204,0.30);
+      --gold:        #ffcc44;
+      --gold-bg:     rgba(255,204,68,0.12);
+      --gold-bdr:    rgba(255,204,68,0.35);
+      --danger:      #ff5555;
+      --today-bdr:   #00ffcc;
+      --card-hover:  #161e1c;
+      --input-bg:    #1a1a1a;
+      --input-bdr:   #2a4a3a;
+      --scrollbar:   #2a4a3a;
+      --map-tiles:   dark;
+    }
+
+    /* ── Light theme overrides ── */
+    body.light {
+      --bg:          #ffffff;
+      --surface:     #f5f7f6;
+      --surface2:    #eef2f0;
+      --border:      #d8e5e0;
+      --border2:     #e8efec;
+      --text:        #1a1a1a;
+      --text-dim:    #555;
+      --text-mute:   #aaa;
+      --accent:      #0a6649;
+      --accent-bg:   rgba(10,102,73,0.07);
+      --accent-bdr:  rgba(10,102,73,0.28);
+      --gold:        #a05f00;
+      --gold-bg:     rgba(160,95,0,0.08);
+      --gold-bdr:    rgba(160,95,0,0.28);
+      --danger:      #cc2200;
+      --today-bdr:   #0a6649;
+      --card-hover:  #eef4f1;
+      --input-bg:    #ffffff;
+      --input-bdr:   #c5d8d0;
+      --scrollbar:   #c5d8d0;
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: #0d0d0d;
-      color: #d4d4d4;
+      background: var(--bg);
+      color: var(--text);
       font-family: 'Courier New', monospace;
       display: flex;
       flex-direction: column;
       height: 100vh;
       overflow: hidden;
+      transition: background 0.2s, color 0.2s;
     }
 
     /* ── Top bar ── */
     #topbar {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      padding: 0.65rem 1rem;
-      background: #111;
-      border-bottom: 1px solid #1e3a30;
+      gap: 0.6rem;
+      padding: 0.6rem 0.9rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
 
     #topbar h1 {
-      font-size: 0.85rem;
-      letter-spacing: 0.22em;
-      color: #00ffcc;
-      text-shadow: 0 0 10px rgba(0,255,200,0.5);
+      font-size: 0.8rem;
+      letter-spacing: 0.2em;
+      color: var(--accent);
       white-space: nowrap;
     }
 
     #urlInput {
       flex: 1;
-      background: #1a1a1a;
-      border: 1px solid #2a4a3a;
-      color: #ccc;
-      font-family: 'Courier New', monospace;
-      font-size: 0.8rem;
-      padding: 0.4rem 0.65rem;
+      background: var(--input-bg);
+      border: 1px solid var(--input-bdr);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.78rem;
+      padding: 0.38rem 0.6rem;
       border-radius: 3px;
       outline: none;
       min-width: 0;
     }
-    #urlInput:focus { border-color: #00ffcc44; }
-    #urlInput::placeholder { color: #444; }
+    #urlInput:focus { border-color: var(--accent-bdr); }
+    #urlInput::placeholder { color: var(--text-mute); }
 
     button {
-      font-family: 'Courier New', monospace;
-      font-size: 0.78rem;
-      letter-spacing: 0.08em;
-      border: none;
+      font-family: inherit;
+      font-size: 0.76rem;
+      letter-spacing: 0.06em;
       border-radius: 3px;
       cursor: pointer;
-      padding: 0.4rem 0.9rem;
+      padding: 0.38rem 0.8rem;
       white-space: nowrap;
+      transition: background 0.15s;
     }
 
     #runBtn {
-      background: #00ffcc22;
-      border: 1px solid #00ffcc55;
-      color: #00ffcc;
+      background: var(--accent-bg);
+      border: 1px solid var(--accent-bdr);
+      color: var(--accent);
     }
-    #runBtn:hover { background: #00ffcc33; }
+    #runBtn:hover { background: var(--accent-bg); filter: brightness(1.2); }
     #runBtn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    #todayToggle {
+    #themeBtn {
       background: transparent;
-      border: 1px solid #2a4a3a;
-      color: #aaa;
-      padding: 0.4rem 0.7rem;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 0.38rem 0.55rem;
+      font-size: 0.95rem;
     }
-    #todayToggle.active {
-      background: #00ffcc18;
-      border-color: #00ffcc55;
-      color: #00ffcc;
-    }
+    #themeBtn:hover { border-color: var(--accent-bdr); color: var(--accent); }
 
     #status {
-      font-size: 0.72rem;
-      color: #556;
+      font-size: 0.7rem;
+      color: var(--text-mute);
       white-space: nowrap;
     }
-    #status.running { color: #ffcc44; }
-    #status.done    { color: #00ffcc; }
-    #status.error   { color: #ff5555; }
+    #status.running { color: var(--gold); }
+    #status.done    { color: var(--accent); }
+    #status.error   { color: var(--danger); }
 
-    /* ── Main layout ── */
+    /* ── Layout ── */
     #main {
       display: flex;
       flex: 1;
@@ -104,169 +150,222 @@
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
-      background: #111;
-      border-right: 1px solid #1e3a30;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
       overflow: hidden;
     }
 
     /* Progress log */
     #logWrap {
       flex-shrink: 0;
-      max-height: 180px;
+      max-height: 160px;
       overflow-y: auto;
-      padding: 0.5rem 0.75rem;
-      border-bottom: 1px solid #1a2a24;
+      padding: 0.45rem 0.7rem;
+      border-bottom: 1px solid var(--border2);
       display: none;
     }
     #logWrap.visible { display: block; }
-    #log {
-      font-size: 0.68rem;
-      color: #556;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-all;
+    #log { font-size: 0.66rem; color: var(--text-mute); line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+    .log-hi  { color: var(--text-dim) !important; }
+    .log-ok  { color: var(--accent) !important; }
+    .log-err { color: var(--danger) !important; }
+
+    /* Day filter tabs */
+    #dayFilters {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }
-    #log .log-hi  { color: #aaa; }
-    #log .log-ok  { color: #00ffcc; }
-    #log .log-err { color: #ff5555; }
+
+    .day-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      border-right: 1px solid var(--border2);
+      color: var(--text-mute);
+      font-size: 0.68rem;
+      letter-spacing: 0.1em;
+      padding: 0.45rem 0;
+    }
+    .day-btn:last-child { border-right: none; }
+    .day-btn:hover { color: var(--text); background: var(--surface2); }
+    .day-btn.active {
+      color: var(--accent);
+      background: var(--accent-bg);
+      border-bottom: 2px solid var(--accent);
+    }
+
+    /* Section headers */
+    .section-hdr {
+      font-size: 0.62rem;
+      letter-spacing: 0.18em;
+      color: var(--text-mute);
+      padding: 0.4rem 0.7rem 0.3rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border2);
+      flex-shrink: 0;
+    }
 
     /* Listings */
     #listingsWrap {
       flex: 1;
       overflow-y: auto;
-      padding: 0.5rem 0;
+      min-height: 0;
     }
 
     .listing-card {
-      padding: 0.55rem 0.75rem;
-      border-bottom: 1px solid #1a2020;
+      padding: 0.5rem 0.7rem;
+      border-bottom: 1px solid var(--border2);
       cursor: pointer;
-      transition: background 0.12s;
+      transition: background 0.1s;
       position: relative;
+      border-left: 2px solid transparent;
     }
-    .listing-card:hover { background: #161e1c; }
-    .listing-card.excluded { opacity: 0.35; }
-    .listing-card.today-hl { border-left: 2px solid #00ffcc; }
-    .listing-card.routed { border-left: 2px solid #ffcc44; }
+    .listing-card:hover  { background: var(--card-hover); }
+    .listing-card.excluded { opacity: 0.3; }
+    .listing-card.today-hl { border-left-color: var(--accent); }
+    .listing-card.routed   { border-left-color: var(--gold); }
 
     .card-when {
-      font-size: 0.65rem;
-      color: #00ffcc;
-      letter-spacing: 0.1em;
-      margin-bottom: 0.18rem;
+      font-size: 0.63rem;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      margin-bottom: 0.15rem;
     }
-    .listing-card.excluded .card-when { color: #445; }
+    .listing-card.excluded .card-when { color: var(--text-mute); }
 
-    .card-address {
-      font-size: 0.75rem;
-      color: #ccc;
-      margin-bottom: 0.12rem;
-    }
+    .card-address { font-size: 0.73rem; color: var(--text); margin-bottom: 0.1rem; }
+    .card-agent   { font-size: 0.63rem; color: var(--text-dim); }
 
-    .card-agent {
-      font-size: 0.65rem;
-      color: #556;
-    }
-
-    .card-route-num {
+    .card-num {
       position: absolute;
-      top: 0.45rem;
-      right: 2rem;
-      font-size: 0.7rem;
-      color: #ffcc44;
-      font-weight: bold;
+      top: 0.45rem; right: 2rem;
+      font-size: 0.68rem; font-weight: bold;
+      color: var(--gold);
     }
 
     .exclude-btn {
       position: absolute;
-      top: 0.45rem;
-      right: 0.5rem;
-      background: transparent;
-      border: none;
-      color: #334;
-      font-size: 0.8rem;
-      padding: 0 0.2rem;
-      cursor: pointer;
-      line-height: 1;
+      top: 0.42rem; right: 0.45rem;
+      background: transparent; border: none;
+      color: var(--text-mute);
+      font-size: 0.82rem; padding: 0 0.15rem;
+      cursor: pointer; line-height: 1;
     }
-    .exclude-btn:hover { color: #ff5555; }
-    .listing-card.excluded .exclude-btn { color: #445; }
-    .listing-card.excluded .exclude-btn:hover { color: #00ffcc; }
+    .exclude-btn:hover { color: var(--danger); }
+    .listing-card.excluded .exclude-btn:hover { color: var(--accent); }
+
+    /* Empty state */
+    .empty-msg {
+      padding: 1.2rem 0.7rem;
+      font-size: 0.7rem;
+      color: var(--text-mute);
+    }
+
+    /* History */
+    #historySection {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+    }
+
+    #historyToggle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.45rem 0.7rem;
+      font-size: 0.62rem;
+      letter-spacing: 0.18em;
+      color: var(--text-mute);
+      cursor: pointer;
+      user-select: none;
+    }
+    #historyToggle:hover { color: var(--text-dim); }
+
+    #historyWrap {
+      display: none;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    #historyWrap.open { display: block; }
+
+    .history-week {
+      padding: 0.35rem 0.7rem;
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border2);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+    }
+    .history-week:hover { background: var(--surface2); }
+    .history-count { color: var(--text-mute); }
 
     /* Route panel */
     #routePanel {
       flex-shrink: 0;
-      border-top: 1px solid #1e3a30;
-      padding: 0.65rem 0.75rem;
+      border-top: 1px solid var(--border);
+      padding: 0.6rem 0.7rem;
+      background: var(--surface);
     }
 
     #homeInput {
       width: 100%;
-      background: #1a1a1a;
-      border: 1px solid #2a4a3a;
-      color: #ccc;
-      font-family: 'Courier New', monospace;
-      font-size: 0.75rem;
+      background: var(--input-bg);
+      border: 1px solid var(--input-bdr);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.73rem;
       padding: 0.35rem 0.55rem;
       border-radius: 3px;
       outline: none;
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.45rem;
     }
-    #homeInput:focus { border-color: #00ffcc44; }
-    #homeInput::placeholder { color: #444; }
+    #homeInput:focus  { border-color: var(--accent-bdr); }
+    #homeInput::placeholder { color: var(--text-mute); }
 
-    #routeActions { display: flex; gap: 0.5rem; }
+    #routeActions { display: flex; gap: 0.45rem; }
 
     #planBtn {
       flex: 1;
-      background: #ffcc4422;
-      border: 1px solid #ffcc4455;
-      color: #ffcc44;
+      background: var(--gold-bg);
+      border: 1px solid var(--gold-bdr);
+      color: var(--gold);
     }
-    #planBtn:hover { background: #ffcc4433; }
+    #planBtn:hover { filter: brightness(1.15); }
     #planBtn:disabled { opacity: 0.35; cursor: not-allowed; }
 
     #mapsBtn {
-      background: #1a3a2a;
-      border: 1px solid #2a5a3a;
-      color: #aaa;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
       display: none;
     }
-    #mapsBtn:hover { color: #fff; }
+    #mapsBtn:hover { color: var(--text); }
     #mapsBtn.visible { display: block; }
 
-    #routeStatus {
-      font-size: 0.68rem;
-      color: #556;
-      margin-top: 0.4rem;
-      min-height: 1rem;
-    }
+    #routeStatus { font-size: 0.67rem; color: var(--text-mute); margin-top: 0.38rem; min-height: 1rem; }
 
     /* ── Map ── */
-    #map {
-      flex: 1;
-      z-index: 0;
-    }
+    #map { flex: 1; }
 
-    /* Leaflet pin number labels */
+    /* Pin labels */
     .pin-label {
-      background: #ffcc44;
+      background: var(--gold, #ffcc44);
       color: #000;
       font-family: 'Courier New', monospace;
-      font-size: 11px;
-      font-weight: bold;
+      font-size: 11px; font-weight: bold;
       border-radius: 50%;
-      width: 20px;
-      height: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 2px solid #000;
+      width: 20px; height: 20px;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px solid rgba(0,0,0,0.5);
     }
 
+    /* Scrollbars */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #2a4a3a; border-radius: 2px; }
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
   </style>
 </head>
 <body>
@@ -275,14 +374,30 @@
   <h1>◈ OPEN HOUSE FINDER</h1>
   <input id="urlInput" type="text" placeholder="Paste Redfin neighborhood URL…" spellcheck="false"/>
   <button id="runBtn">RUN</button>
-  <button id="todayToggle">TODAY ONLY</button>
   <span id="status">idle</span>
+  <button id="themeBtn" title="Toggle theme">☀</button>
 </div>
 
 <div id="main">
   <div id="sidebar">
     <div id="logWrap"><pre id="log"></pre></div>
+
+    <div id="dayFilters">
+      <button class="day-btn active" data-day="ALL">ALL</button>
+      <button class="day-btn" data-day="TODAY">TODAY</button>
+      <button class="day-btn" data-day="FRI">FRI</button>
+      <button class="day-btn" data-day="SAT">SAT</button>
+      <button class="day-btn" data-day="SUN">SUN</button>
+    </div>
+
+    <div class="section-hdr" id="weekendHdr">THIS WEEKEND</div>
     <div id="listingsWrap"></div>
+
+    <div id="historySection">
+      <div id="historyToggle">HISTORY <span id="historyArrow">▶</span></div>
+      <div id="historyWrap"></div>
+    </div>
+
     <div id="routePanel">
       <input id="homeInput" type="text" placeholder="Your home address…" spellcheck="false"/>
       <div id="routeActions">
@@ -292,41 +407,101 @@
       <div id="routeStatus"></div>
     </div>
   </div>
+
   <div id="map"></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+// ── State ──────────────────────────────────────────────────────────────────
+let allListings = [];
+let activeDay   = 'ALL';
+let routeOrder  = [];     // listing ids in route order
+let mapsUrl     = '';
+let markers     = {};
+let routeLayer  = null;
+let tileLayer   = null;
+let sse         = null;
+let isLight     = false;
+
+const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(); // MON, TUE…
+
+function currentISOWeek() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  const w1 = new Date(d.getFullYear(), 0, 4);
+  const wk = 1 + Math.round(((d - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7);
+  return `${d.getFullYear()}-W${String(wk).padStart(2, '0')}`;
+}
+const thisWeek = currentISOWeek();
+
+function weekLabel(isoWeek) {
+  const [yr, w] = isoWeek.split('-W').map(Number);
+  const jan4    = new Date(yr, 0, 4);
+  const dow     = (jan4.getDay() + 6) % 7;
+  const mon     = new Date(jan4.getTime() - dow * 86400000 + (w - 1) * 7 * 86400000);
+  return 'Week of ' + mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 // ── Map setup ──────────────────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: true }).setView([47.56, -122.39], 13);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+
+function makeTileUrl(light) {
+  return light
+    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+}
+
+tileLayer = L.tileLayer(makeTileUrl(false), {
   attribution: '© OpenStreetMap © CARTO',
   maxZoom: 19,
 }).addTo(map);
 
-// ── State ──────────────────────────────────────────────────────────────────
-let allListings   = [];
-let todayOnly     = false;
-let markers       = {};      // id → L.marker
-let routeLayer    = null;
-let routeOrder    = [];      // ordered listing ids
-let mapsUrl       = '';
-let sse           = null;
-
-const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+// ── Theme toggle ───────────────────────────────────────────────────────────
+document.getElementById('themeBtn').addEventListener('click', () => {
+  isLight = !isLight;
+  document.body.classList.toggle('light', isLight);
+  document.getElementById('themeBtn').textContent = isLight ? '🌙' : '☀';
+  tileLayer.remove();
+  tileLayer = L.tileLayer(makeTileUrl(isLight), {
+    attribution: '© OpenStreetMap © CARTO',
+    maxZoom: 19,
+  }).addTo(map);
+});
 
 // ── Elements ───────────────────────────────────────────────────────────────
-const urlInput      = document.getElementById('urlInput');
-const runBtn        = document.getElementById('runBtn');
-const todayToggle   = document.getElementById('todayToggle');
-const statusEl      = document.getElementById('status');
-const logWrap       = document.getElementById('logWrap');
-const logEl         = document.getElementById('log');
-const listingsWrap  = document.getElementById('listingsWrap');
-const homeInput     = document.getElementById('homeInput');
-const planBtn       = document.getElementById('planBtn');
-const mapsBtn       = document.getElementById('mapsBtn');
-const routeStatus   = document.getElementById('routeStatus');
+const urlInput     = document.getElementById('urlInput');
+const runBtn       = document.getElementById('runBtn');
+const statusEl     = document.getElementById('status');
+const logWrap      = document.getElementById('logWrap');
+const logEl        = document.getElementById('log');
+const listingsWrap = document.getElementById('listingsWrap');
+const weekendHdr   = document.getElementById('weekendHdr');
+const historyWrap  = document.getElementById('historyWrap');
+const historyArrow = document.getElementById('historyArrow');
+const homeInput    = document.getElementById('homeInput');
+const planBtn      = document.getElementById('planBtn');
+const mapsBtn      = document.getElementById('mapsBtn');
+const routeStatus  = document.getElementById('routeStatus');
+
+// ── Day filter buttons ─────────────────────────────────────────────────────
+document.querySelectorAll('.day-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeDay = btn.dataset.day;
+    clearRoute();
+    renderListings();
+    renderMarkers();
+  });
+});
+
+// ── History toggle ─────────────────────────────────────────────────────────
+document.getElementById('historyToggle').addEventListener('click', () => {
+  const open = historyWrap.classList.toggle('open');
+  historyArrow.textContent = open ? '▼' : '▶';
+});
 
 // ── Run scrape ─────────────────────────────────────────────────────────────
 runBtn.addEventListener('click', async () => {
@@ -338,7 +513,7 @@ runBtn.addEventListener('click', async () => {
   logEl.textContent = '';
   logWrap.classList.add('visible');
 
-  const res = await fetch('/api/run', {
+  const res  = await fetch('/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
@@ -350,105 +525,129 @@ runBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Stream progress via SSE
   if (sse) sse.close();
   sse = new EventSource('/api/progress');
   sse.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'ping') return;
-    if (msg.type === 'log') {
-      appendLog(msg.msg);
-    } else if (msg.type === 'done') {
-      setStatus('done', 'done');
-      runBtn.disabled = false;
-      sse.close();
-      loadListings();
-    } else if (msg.type === 'error') {
-      setStatus('error', msg.msg.slice(0, 60));
-      runBtn.disabled = false;
-      sse.close();
-      loadListings();
-    }
+    if (msg.type === 'log')   { appendLog(msg.msg); return; }
+    if (msg.type === 'done')  { setStatus('done', 'done'); }
+    if (msg.type === 'error') { setStatus('error', msg.msg.slice(0, 60)); }
+    runBtn.disabled = false;
+    sse.close();
+    loadListings();
   };
 });
 
 function appendLog(msg) {
-  const line = document.createElement('span');
-  if (msg.startsWith('[')) {
-    line.className = 'log-hi';
-  } else if (msg.includes('Done —') || msg.includes('address :')) {
-    line.className = 'log-ok';
-  } else if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('timed out')) {
-    line.className = 'log-err';
-  }
-  line.textContent = msg + '\n';
-  logEl.appendChild(line);
+  const span = document.createElement('span');
+  if      (msg.startsWith('['))                                           span.className = 'log-hi';
+  else if (msg.includes('Done') || msg.includes('address'))              span.className = 'log-ok';
+  else if (/error|timed out/i.test(msg))                                 span.className = 'log-err';
+  span.textContent = msg + '\n';
+  logEl.appendChild(span);
   logWrap.scrollTop = logWrap.scrollHeight;
 }
 
-// ── Load & render listings ─────────────────────────────────────────────────
+// ── Load listings ──────────────────────────────────────────────────────────
 async function loadListings() {
-  const res  = await fetch('/api/listings');
+  const res   = await fetch('/api/listings');
   allListings = await res.json();
   renderListings();
   renderMarkers();
+  renderHistory();
+}
+
+// ── Filter helpers ─────────────────────────────────────────────────────────
+function currentWeekendListings() {
+  return allListings.filter(l => l.scraped_week === thisWeek || !l.scraped_week);
+}
+
+function applyDayFilter(list) {
+  if (activeDay === 'ALL')   return list;
+  if (activeDay === 'TODAY') return list.filter(l => l.open_date === today);
+  return list.filter(l => l.open_date === activeDay);
 }
 
 function visibleListings() {
-  if (todayOnly) return allListings.filter(l => l.open_date === today);
-  return allListings;
+  return applyDayFilter(currentWeekendListings());
 }
 
+// ── Render listings pane ───────────────────────────────────────────────────
 function renderListings() {
   const list = visibleListings();
   listingsWrap.innerHTML = '';
 
+  const count = list.filter(l => !l.excluded).length;
+  weekendHdr.textContent = `THIS WEEKEND  ${count ? `(${count} eligible)` : ''}`;
+
   if (!list.length) {
-    listingsWrap.innerHTML = '<div style="padding:1rem;color:#445;font-size:0.72rem">No listings yet. Run a scrape.</div>';
+    listingsWrap.innerHTML = '<div class="empty-msg">No listings. Run a scrape or adjust filter.</div>';
     return;
   }
 
   for (const l of list) {
+    const routeIdx = routeOrder.indexOf(l.id);
+    const isToday  = l.open_date === today;
     const card = document.createElement('div');
-    card.className = 'listing-card' +
-      (l.excluded         ? ' excluded'  : '') +
-      (l.open_date === today ? ' today-hl' : '') +
-      (routeOrder.includes(l.id) ? ' routed' : '');
+    card.className = 'listing-card'
+      + (l.excluded          ? ' excluded' : '')
+      + (isToday             ? ' today-hl' : '')
+      + (routeIdx >= 0       ? ' routed'   : '');
     card.dataset.id = l.id;
 
     const when = [l.open_date, l.open_time].filter(Boolean).join(' ');
-
-    const routeIdx = routeOrder.indexOf(l.id);
     card.innerHTML = `
-      ${routeIdx >= 0 ? `<span class="card-route-num">#${routeIdx + 1}</span>` : ''}
+      ${routeIdx >= 0 ? `<span class="card-num">#${routeIdx + 1}</span>` : ''}
       <button class="exclude-btn" title="${l.excluded ? 'Re-include' : 'Exclude'}">${l.excluded ? '↩' : '✕'}</button>
       <div class="card-when">${when || '—'}</div>
       <div class="card-address">${l.address}</div>
       ${l.agent_name ? `<div class="card-agent">Agent: ${l.agent_name}</div>` : ''}
     `;
 
-    card.querySelector('.exclude-btn').addEventListener('click', (e) => {
+    card.querySelector('.exclude-btn').addEventListener('click', e => {
       e.stopPropagation();
       toggleExclude(l);
     });
-
     card.addEventListener('click', () => {
-      if (markers[l.id]) {
-        map.setView(markers[l.id].getLatLng(), 16);
-        markers[l.id].openPopup();
-      }
+      if (markers[l.id]) { map.setView(markers[l.id].getLatLng(), 16); markers[l.id].openPopup(); }
     });
 
     listingsWrap.appendChild(card);
   }
 }
 
+// ── Render history pane ────────────────────────────────────────────────────
+function renderHistory() {
+  const old = allListings.filter(l => l.scraped_week && l.scraped_week !== thisWeek);
+  if (!old.length) {
+    historyWrap.innerHTML = '<div class="empty-msg">No previous runs.</div>';
+    return;
+  }
+
+  // Group by scraped_week
+  const groups = {};
+  for (const l of old) {
+    if (!groups[l.scraped_week]) groups[l.scraped_week] = [];
+    groups[l.scraped_week].push(l);
+  }
+
+  historyWrap.innerHTML = '';
+  const weeks = Object.keys(groups).sort().reverse();
+  for (const wk of weeks) {
+    const row = document.createElement('div');
+    row.className = 'history-week';
+    row.innerHTML = `<span>${weekLabel(wk)}</span><span class="history-count">${groups[wk].length} listings</span>`;
+    historyWrap.appendChild(row);
+  }
+}
+
+// ── Markers ────────────────────────────────────────────────────────────────
 function renderMarkers() {
-  // Clear old markers
   Object.values(markers).forEach(m => map.removeLayer(m));
   markers = {};
 
-  const list = visibleListings();
+  const list   = visibleListings();
   const bounds = [];
 
   for (const l of list) {
@@ -456,40 +655,35 @@ function renderMarkers() {
 
     const routeIdx = routeOrder.indexOf(l.id);
     const isToday  = l.open_date === today;
-    const color    = l.excluded ? '#444' : routeIdx >= 0 ? '#ffcc44' : isToday ? '#00ffcc' : '#7799aa';
-
-    let icon;
-    if (routeIdx >= 0) {
-      icon = L.divIcon({
-        className: '',
-        html: `<div class="pin-label">${routeIdx + 1}</div>`,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
-      });
-    } else {
-      icon = L.circleMarker ? null : null; // use circleMarker below
-    }
 
     let marker;
     if (routeIdx >= 0) {
-      marker = L.marker([l.lat, l.lng], { icon });
+      marker = L.marker([l.lat, l.lng], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div class="pin-label">${routeIdx + 1}</div>`,
+          iconSize: [20, 20], iconAnchor: [10, 10],
+        }),
+      });
     } else {
+      const color = l.excluded ? '#555'
+                  : isToday    ? 'var(--accent, #00ffcc)'
+                  :              '#7799aa';
       marker = L.circleMarker([l.lat, l.lng], {
         radius: isToday ? 7 : 5,
-        fillColor: color,
-        color: '#000',
-        weight: 1,
-        fillOpacity: l.excluded ? 0.25 : 0.85,
+        fillColor: l.excluded ? '#444' : isToday ? '#00ffcc' : '#7799aa',
+        color: '#000', weight: 1,
+        fillOpacity: l.excluded ? 0.2 : 0.85,
       });
     }
 
     const when = [l.open_date, l.open_time].filter(Boolean).join(' ');
     marker.bindPopup(`
       <div style="font-family:monospace;font-size:12px;min-width:180px">
-        <div style="color:#00ffcc;margin-bottom:4px">${when || '—'}</div>
+        <div style="color:#00b890;margin-bottom:4px">${when || '—'}</div>
         <div style="margin-bottom:3px">${l.address}</div>
         ${l.agent_name ? `<div style="color:#888">Agent: ${l.agent_name}</div>` : ''}
-        ${l.listing_url ? `<div style="margin-top:5px"><a href="${l.listing_url}" target="_blank" style="color:#00ffcc">View on Redfin ↗</a></div>` : ''}
+        ${l.listing_url ? `<div style="margin-top:5px"><a href="${l.listing_url}" target="_blank" style="color:#00b890">View on Redfin ↗</a></div>` : ''}
       </div>
     `);
 
@@ -498,21 +692,23 @@ function renderMarkers() {
     bounds.push([l.lat, l.lng]);
   }
 
-  if (bounds.length > 0) {
-    map.fitBounds(bounds, { padding: [40, 40] });
-  }
+  if (bounds.length) map.fitBounds(bounds, { padding: [40, 40] });
 }
 
 function drawRoute(ordered) {
   if (routeLayer) map.removeLayer(routeLayer);
-  if (!ordered.length) return;
   const latlngs = ordered.filter(s => s.lat && s.lng).map(s => [s.lat, s.lng]);
+  if (!latlngs.length) return;
   routeLayer = L.polyline(latlngs, {
-    color: '#ffcc44',
-    weight: 2.5,
-    opacity: 0.7,
-    dashArray: '6 4',
+    color: '#ffcc44', weight: 2.5, opacity: 0.7, dashArray: '6 4',
   }).addTo(map);
+}
+
+function clearRoute() {
+  routeOrder = [];
+  mapsUrl    = '';
+  mapsBtn.classList.remove('visible');
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
 }
 
 // ── Exclude / include ──────────────────────────────────────────────────────
@@ -524,33 +720,27 @@ async function toggleExclude(listing) {
     body: JSON.stringify({ id: listing.id, excluded: newVal }),
   });
   listing.excluded = newVal;
-  // Clear route if we changed something
-  routeOrder = [];
-  mapsBtn.classList.remove('visible');
-  mapsUrl = '';
-  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  clearRoute();
   renderListings();
   renderMarkers();
 }
-
-// ── Today toggle ───────────────────────────────────────────────────────────
-todayToggle.addEventListener('click', () => {
-  todayOnly = !todayOnly;
-  todayToggle.classList.toggle('active', todayOnly);
-  renderListings();
-  renderMarkers();
-});
 
 // ── Plan route ─────────────────────────────────────────────────────────────
 planBtn.addEventListener('click', async () => {
   const homeAddr = homeInput.value.trim();
   if (!homeAddr) { routeStatus.textContent = 'Enter your home address first.'; return; }
 
-  planBtn.disabled = true;
-  routeStatus.textContent = 'Geocoding addresses…';
+  // Candidates: visible (day filter applied) + not excluded
+  const candidates = visibleListings().filter(l => !l.excluded);
+  if (!candidates.length) {
+    routeStatus.textContent = 'No eligible listings — unexclude some or change the day filter.';
+    return;
+  }
 
-  // Geocode home
-  const homeRes  = await fetch('/api/geocode', {
+  planBtn.disabled = true;
+  routeStatus.textContent = 'Geocoding home address…';
+
+  const homeRes    = await fetch('/api/geocode', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address: homeAddr }),
@@ -562,43 +752,27 @@ planBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Collect non-excluded listings that are visible and have a real address
-  const candidates = visibleListings().filter(l => !l.excluded);
-  if (!candidates.length) {
-    routeStatus.textContent = 'No eligible listings to route.';
-    planBtn.disabled = false;
-    return;
-  }
-
   routeStatus.textContent = `Optimizing route for ${candidates.length} stops…`;
 
-  const routeRes = await fetch('/api/route', {
+  const routeRes  = await fetch('/api/route', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      home: { ...homeCoords, address: homeAddr },
-      ids: candidates.map(l => l.id),
-    }),
+    body: JSON.stringify({ home: { ...homeCoords, address: homeAddr }, ids: candidates.map(l => l.id) }),
   });
   const routeData = await routeRes.json();
-
   planBtn.disabled = false;
 
-  if (routeData.error) {
-    routeStatus.textContent = routeData.error;
-    return;
-  }
+  if (routeData.error) { routeStatus.textContent = routeData.error; return; }
 
   routeOrder = routeData.route.map(s => s.id);
   mapsUrl    = routeData.maps_url;
 
-  // Merge geocoded coords back into allListings
   for (const s of routeData.route) {
     const l = allListings.find(x => x.id === s.id);
     if (l) { l.lat = s.lat; l.lng = s.lng; }
   }
 
-  routeStatus.textContent = `Route: ${routeOrder.length} stops`;
+  routeStatus.textContent = `Route ready — ${routeOrder.length} stops`;
   mapsBtn.classList.add('visible');
 
   drawRoute(routeData.route);
@@ -606,15 +780,10 @@ planBtn.addEventListener('click', async () => {
   renderMarkers();
 });
 
-mapsBtn.addEventListener('click', () => {
-  if (mapsUrl) window.open(mapsUrl, '_blank');
-});
+mapsBtn.addEventListener('click', () => { if (mapsUrl) window.open(mapsUrl, '_blank'); });
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-function setStatus(cls, text) {
-  statusEl.className = cls;
-  statusEl.textContent = text;
-}
+function setStatus(cls, text) { statusEl.className = cls; statusEl.textContent = text; }
 
 // ── Init ───────────────────────────────────────────────────────────────────
 loadListings();
