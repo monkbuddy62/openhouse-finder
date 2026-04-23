@@ -150,60 +150,63 @@ def run(neighborhood, slow_mo=700):
             print(f'[{i}/{len(listing_urls)}] {url}')
             try:
                 page.goto(url, wait_until='domcontentloaded', timeout=25000)
-                page.wait_for_timeout(1600)
+                page.wait_for_timeout(2800)
 
-                # Address
-                street = get_text(page, [
-                    '[data-rf-test-name="abp-streetLine"]',
-                    '.street-address',
-                    'h1.address',
-                    '.homeAddress span:first-child',
-                ])
-                city_state = get_text(page, [
-                    '[data-rf-test-name="abp-cityStateZip"]',
-                    '.cityStateZip',
-                    '.homeAddress span:last-child',
-                ])
-                address = ', '.join(filter(None, [street, city_state])) or url
+                # Address — parse reliably from URL
+                # URL pattern: /WA/Seattle/1241-SW-Myrtle-St-98106/home/...
+                parts = url.rstrip('/').split('/')
+                try:
+                    home_idx = parts.index('home')
+                    raw = parts[home_idx - 1]          # e.g. "1241-SW-Myrtle-St-98106"
+                    city = parts[home_idx - 2]         # e.g. "Seattle"
+                    state = parts[home_idx - 3]        # e.g. "WA"
+                    street_zip = raw.replace('-', ' ')
+                    address = f'{street_zip}, {city}, {state}'
+                except Exception:
+                    address = url
 
-                # Open house date / time
-                # Redfin shows "Sat, Apr 26 · 1pm – 3pm" or similar
-                oh_text = get_text(page, [
-                    '.open-house-row',
-                    '[data-rf-test-name="openHouseRow"]',
-                    '.open-house-info',
-                    'div:has-text("Open House"):not(button)',
-                ])
-                if '·' in oh_text:
-                    parts = oh_text.split('·', 1)
-                    open_date = parts[0].strip()
-                    open_time = parts[1].strip()
-                elif oh_text:
-                    open_date = oh_text
-                    open_time = ''
-                else:
-                    open_date = open_time = ''
+                # Open house date / time — search page text for "Open House" block
+                open_date = open_time = ''
+                try:
+                    # Grab all text on the page and hunt for the open house line
+                    oh_text = page.locator(
+                        'text=/Open House/i'
+                    ).first.evaluate('el => el.closest("div,li,span,section").innerText', timeout=3000)
+                    oh_text = oh_text.strip()
+                    if '·' in oh_text:
+                        d, t = oh_text.split('·', 1)
+                        open_date = d.strip()
+                        open_time = t.strip()
+                    elif oh_text:
+                        open_date = oh_text[:80]
+                except Exception:
+                    pass
 
-                # Listing agent
-                agent_name = get_text(page, [
-                    '[data-rf-test-name="listingAgentName"]',
-                    '.listing-agent .agent-name',
-                    '.agent-basic-details--heading',
-                    'span.agent-name',
-                    '.listing-agent-name',
-                ])
+                # Agent — look for "Listed by" text anywhere on page
+                agent_name = ''
+                try:
+                    lb = page.locator('text=/Listed by/i').first
+                    block = lb.evaluate('el => el.closest("div,li,span,p").innerText', timeout=3000)
+                    # Strip the "Listed by" prefix
+                    agent_name = block.replace('Listed by', '').split('\n')[0].strip(' •·,')
+                except Exception:
+                    pass
 
                 row = (address, agent_name, open_date, open_time, url, datetime.now().isoformat())
                 upsert(conn, row)
                 results.append(row)
-                print(f'  address : {address or "?"}')
+                print(f'  address : {address}')
                 print(f'  agent   : {agent_name or "not found"}')
                 print(f'  when    : {open_date} {open_time}\n')
 
             except PlaywrightTimeout:
                 print('  Timed out — skipping\n')
             except Exception as e:
-                print(f'  Error: {e}\n')
+                err = str(e)
+                print(f'  Error: {err[:120]}\n')
+                if 'closed' in err.lower():
+                    print('Browser was closed — stopping early.')
+                    break
 
         browser.close()
 
@@ -226,8 +229,8 @@ def run(neighborhood, slow_mo=700):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Find Redfin open houses for a neighborhood')
     parser.add_argument('neighborhood', nargs='?', help='Neighborhood, city, or zip code')
-    parser.add_argument('--slow', type=int, default=700,
-                        help='Milliseconds between actions — increase to watch more easily (default: 700)')
+    parser.add_argument('--slow', type=int, default=1200,
+                        help='Milliseconds between actions — increase to watch more easily (default: 1200)')
     args = parser.parse_args()
 
     neighborhood = args.neighborhood
