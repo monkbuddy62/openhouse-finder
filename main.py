@@ -4,19 +4,74 @@ Open House Finder — scrapes Redfin open houses for a neighborhood
 and stores results in a local SQLite database.
 
 Usage:
+    python main.py "https://www.redfin.com/neighborhood/3040/WA/Seattle/West-Seattle/filter/open-house=anytime"
     python main.py "Ballard, Seattle, WA"
-    python main.py "98107"
     python main.py              # will prompt you
-    python main.py "Capitol Hill, Seattle" --slow 1200
 """
 
 import sys
 import sqlite3
 import argparse
+import random
+import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 DB_FILE = 'openhouses.db'
+
+# Injected into every page before any scripts run — removes the most common
+# bot-detection signals that sites check for.
+STEALTH_JS = """
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins',   { get: () => [1,2,3,4,5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
+    window.chrome = { runtime: {} };
+    const _query = navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.query = (p) =>
+        p.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : _query(p);
+"""
+
+
+def pause(min_s=1.5, max_s=3.5):
+    """Random human-paced sleep."""
+    time.sleep(random.uniform(min_s, max_s))
+
+
+def long_pause(min_s=4.0, max_s=9.0):
+    """Occasional longer break so the request pattern doesn't look robotic."""
+    secs = random.uniform(min_s, max_s)
+    print(f'  (pausing {secs:.0f}s…)')
+    time.sleep(secs)
+
+
+def human_scroll(page):
+    """Scroll in random increments to mimic a person reading down the page."""
+    total = page.evaluate('document.body.scrollHeight')
+    pos   = 0
+    while pos < total:
+        step = random.randint(250, 700)
+        pos  = min(pos + step, total)
+        page.evaluate(f'window.scrollTo(0, {pos})')
+        time.sleep(random.uniform(0.08, 0.25))
+    # Pause at the bottom as if reading
+    pause(1.0, 2.5)
+    # Scroll back up a little — real users do this
+    page.evaluate(f'window.scrollTo(0, {int(total * random.uniform(0.7, 0.9))})')
+    pause(0.5, 1.2)
+
+
+def scroll_for_cards(page):
+    """Scroll repeatedly until no new listing cards appear (infinite scroll)."""
+    prev = 0
+    for _ in range(30):
+        human_scroll(page)
+        cards = page.locator('.HomeCard, [data-rf-test-name="mapHomeCard"]').all()
+        if len(cards) == prev:
+            break
+        prev = len(cards)
+    return prev
 
 
 def init_db():
@@ -49,54 +104,61 @@ def upsert(conn, row):
     conn.commit()
 
 
-def scroll_to_bottom(page):
-    """Repeatedly scroll to trigger Redfin's infinite scroll until no new cards appear."""
-    prev_count = 0
-    for _ in range(25):
-        page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-        page.wait_for_timeout(1800)
-        cards = page.locator('.HomeCard, [data-rf-test-name="mapHomeCard"]').all()
-        if len(cards) == prev_count:
-            break
-        prev_count = len(cards)
-    return prev_count
+def address_from_url(url):
+    """Parse a human-readable address out of a Redfin listing URL."""
+    parts = url.rstrip('/').split('/')
+    try:
+        home_idx = parts.index('home')
+        raw   = parts[home_idx - 1]   # e.g. "1241-SW-Myrtle-St-98106"
+        city  = parts[home_idx - 2]   # e.g. "Seattle"
+        state = parts[home_idx - 3]   # e.g. "WA"
+        return f'{raw.replace("-", " ")}, {city}, {state}'
+    except Exception:
+        return url
 
 
-def get_text(page, selectors):
-    """Try a list of selectors, return inner text of the first match."""
-    for sel in selectors:
-        try:
-            el = page.locator(sel).first
-            if el.count() > 0:
-                return el.inner_text(timeout=2000).strip()
-        except Exception:
-            pass
-    return ''
-
-
-def run(neighborhood, slow_mo=700):
-    conn = init_db()
+def run(neighborhood, slow_mo=0):
+    conn    = init_db()
     results = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False, slow_mo=slow_mo)
-        ctx  = browser.new_context(viewport={'width': 1440, 'height': 900})
+        browser = p.chromium.launch(
+            headless=False,
+            slow_mo=slow_mo,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-first-run',
+                '--no-default-browser-check',
+            ],
+        )
+        ctx = browser.new_context(
+            viewport={'width': 1440, 'height': 900},
+            user_agent=(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/124.0.0.0 Safari/537.36'
+            ),
+            locale='en-US',
+            timezone_id='America/Los_Angeles',
+        )
+        # Patch every page before any JS runs
+        ctx.add_init_script(STEALTH_JS)
         page = ctx.new_page()
 
         # ── Navigate to open house results ───────────────────────────────────
         if neighborhood.startswith('http'):
-            # User passed a direct Redfin URL — just go there
             start_url = neighborhood
         else:
-            # Build search URL and append open house filter
-            # Tip: search manually on redfin.com, copy the URL, and pass that instead
             print(f'\nSearching Redfin for: {neighborhood}')
             page.goto('https://www.redfin.com', wait_until='domcontentloaded')
+            pause(2, 4)
 
             search_box = page.locator('input[placeholder*="Search"], #search-box-input').first
             search_box.wait_for(timeout=12000)
-            search_box.fill(neighborhood)
-            page.wait_for_timeout(1400)
+            # Type like a human — character by character with small random delays
+            for ch in neighborhood:
+                search_box.type(ch, delay=random.randint(60, 160))
+            pause(1.2, 2.0)
 
             try:
                 suggestion = page.locator(
@@ -109,7 +171,7 @@ def run(neighborhood, slow_mo=700):
                 search_box.press('Enter')
 
             page.wait_for_load_state('domcontentloaded')
-            page.wait_for_timeout(2200)
+            pause(2.5, 4.0)
 
             current_url = page.url
             if 'open-house' not in current_url:
@@ -122,17 +184,16 @@ def run(neighborhood, slow_mo=700):
 
         print(f'\nGoing to: {start_url}')
         page.goto(start_url, wait_until='domcontentloaded')
-        page.wait_for_timeout(2500)
+        pause(3, 5)
 
         # ── Scroll to load all cards ─────────────────────────────────────────
         print('Loading all listing cards...')
-        count = scroll_to_bottom(page)
+        count = scroll_for_cards(page)
         print(f'  Found {count} cards')
 
         # ── Collect listing URLs ─────────────────────────────────────────────
         links = page.locator('a[href*="/home/"]').all()
-        seen = set()
-        listing_urls = []
+        seen, listing_urls = set(), []
         for link in links:
             try:
                 href = link.get_attribute('href', timeout=1000)
@@ -143,51 +204,48 @@ def run(neighborhood, slow_mo=700):
             except Exception:
                 pass
 
+        # Shuffle slightly — perfectly sequential requests look robotic
+        random.shuffle(listing_urls)
         print(f'  Collected {len(listing_urls)} unique listings\n')
 
         # ── Visit each listing ───────────────────────────────────────────────
         for i, url in enumerate(listing_urls, 1):
             print(f'[{i}/{len(listing_urls)}] {url}')
+
+            # Occasional longer break every 4-8 listings
+            if i > 1 and i % random.randint(4, 8) == 0:
+                long_pause()
+
             try:
-                page.goto(url, wait_until='domcontentloaded', timeout=25000)
-                page.wait_for_timeout(2800)
+                page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                pause(2.5, 5.0)   # random read time before scraping
 
-                # Address — parse reliably from URL
-                # URL pattern: /WA/Seattle/1241-SW-Myrtle-St-98106/home/...
-                parts = url.rstrip('/').split('/')
-                try:
-                    home_idx = parts.index('home')
-                    raw = parts[home_idx - 1]          # e.g. "1241-SW-Myrtle-St-98106"
-                    city = parts[home_idx - 2]         # e.g. "Seattle"
-                    state = parts[home_idx - 3]        # e.g. "WA"
-                    street_zip = raw.replace('-', ' ')
-                    address = f'{street_zip}, {city}, {state}'
-                except Exception:
-                    address = url
+                # Scroll a bit as if reading the page
+                page.evaluate(f'window.scrollTo(0, {random.randint(200, 600)})')
+                pause(0.8, 2.0)
 
-                # Open house date / time — search page text for "Open House" block
+                address = address_from_url(url)
+
+                # Open house date / time
                 open_date = open_time = ''
                 try:
-                    # Grab all text on the page and hunt for the open house line
-                    oh_text = page.locator(
-                        'text=/Open House/i'
-                    ).first.evaluate('el => el.closest("div,li,span,section").innerText', timeout=3000)
-                    oh_text = oh_text.strip()
+                    oh_text = page.locator('text=/Open House/i').first.evaluate(
+                        'el => el.closest("div,li,span,section").innerText', timeout=4000
+                    ).strip()
                     if '·' in oh_text:
                         d, t = oh_text.split('·', 1)
-                        open_date = d.strip()
-                        open_time = t.strip()
+                        open_date, open_time = d.strip(), t.strip()
                     elif oh_text:
                         open_date = oh_text[:80]
                 except Exception:
                     pass
 
-                # Agent — look for "Listed by" text anywhere on page
+                # Agent — find "Listed by" text
                 agent_name = ''
                 try:
-                    lb = page.locator('text=/Listed by/i').first
-                    block = lb.evaluate('el => el.closest("div,li,span,p").innerText', timeout=3000)
-                    # Strip the "Listed by" prefix
+                    block = page.locator('text=/Listed by/i').first.evaluate(
+                        'el => el.closest("div,li,span,p").innerText', timeout=4000
+                    )
                     agent_name = block.replace('Listed by', '').split('\n')[0].strip(' •·,')
                 except Exception:
                     pass
@@ -201,12 +259,14 @@ def run(neighborhood, slow_mo=700):
 
             except PlaywrightTimeout:
                 print('  Timed out — skipping\n')
+                pause(3, 6)   # back off before next request
             except Exception as e:
                 err = str(e)
                 print(f'  Error: {err[:120]}\n')
                 if 'closed' in err.lower():
                     print('Browser was closed — stopping early.')
                     break
+                pause(3, 6)
 
         browser.close()
 
@@ -228,15 +288,15 @@ def run(neighborhood, slow_mo=700):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Find Redfin open houses for a neighborhood')
-    parser.add_argument('neighborhood', nargs='?', help='Neighborhood, city, or zip code')
-    parser.add_argument('--slow', type=int, default=1200,
-                        help='Milliseconds between actions — increase to watch more easily (default: 1200)')
+    parser.add_argument('neighborhood', nargs='?', help='Redfin URL or neighborhood name')
+    parser.add_argument('--slow', type=int, default=0,
+                        help='Extra slow-mo delay in ms on top of random pauses (default: 0)')
     args = parser.parse_args()
 
     neighborhood = args.neighborhood
     if not neighborhood:
-        neighborhood = input('Enter neighborhood, city, or zip: ').strip()
+        neighborhood = input('Enter Redfin URL or neighborhood name: ').strip()
     if not neighborhood:
-        sys.exit('No neighborhood provided.')
+        sys.exit('No input provided.')
 
     run(neighborhood, slow_mo=args.slow)
