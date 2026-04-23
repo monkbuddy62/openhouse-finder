@@ -92,10 +92,17 @@ def run(neighborhood, slow_mo=700):
         search_box.fill(neighborhood)
         page.wait_for_timeout(1400)
 
-        # Pick first autocomplete suggestion
-        suggestion = page.locator('.clickable.suggestion, .autocomplete-suggestion').first
-        suggestion.wait_for(timeout=8000)
-        suggestion.click()
+        # Try clicking the first autocomplete suggestion; fall back to pressing Enter
+        try:
+            suggestion = page.locator(
+                '.clickable.suggestion, .autocomplete-suggestion, '
+                '[role="option"], [role="listbox"] li, .SearchTypeaheadRow'
+            ).first
+            suggestion.wait_for(timeout=4000)
+            suggestion.click()
+        except Exception:
+            search_box.press('Enter')
+
         page.wait_for_load_state('domcontentloaded')
         page.wait_for_timeout(2200)
 
