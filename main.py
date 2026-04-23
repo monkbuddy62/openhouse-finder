@@ -83,45 +83,45 @@ def run(neighborhood, slow_mo=700):
         ctx  = browser.new_context(viewport={'width': 1440, 'height': 900})
         page = ctx.new_page()
 
-        # ── Search ──────────────────────────────────────────────────────────
-        print(f'\nSearching Redfin for: {neighborhood}')
-        page.goto('https://www.redfin.com', wait_until='domcontentloaded')
-
-        search_box = page.locator('input[placeholder*="Search"], #search-box-input').first
-        search_box.wait_for(timeout=12000)
-        search_box.fill(neighborhood)
-        page.wait_for_timeout(1400)
-
-        # Try clicking the first autocomplete suggestion; fall back to pressing Enter
-        try:
-            suggestion = page.locator(
-                '.clickable.suggestion, .autocomplete-suggestion, '
-                '[role="option"], [role="listbox"] li, .SearchTypeaheadRow'
-            ).first
-            suggestion.wait_for(timeout=4000)
-            suggestion.click()
-        except Exception:
-            search_box.press('Enter')
-
-        page.wait_for_load_state('domcontentloaded')
-        page.wait_for_timeout(2200)
-
-        # ── Apply Open House filter via URL ──────────────────────────────────
-        # Redfin encodes filters in the URL path — more reliable than clicking buttons.
-        print('Applying Open House filter...')
-        current_url = page.url
-        print(f'  Current URL: {current_url}')
-
-        if 'open-house' not in current_url:
-            if '/filter/' in current_url:
-                filtered_url = current_url.replace('/filter/', '/filter/open-house=anytime,')
-            else:
-                filtered_url = current_url.rstrip('/') + '/filter/open-house=anytime'
-            print(f'  Navigating to: {filtered_url}')
-            page.goto(filtered_url, wait_until='domcontentloaded')
+        # ── Navigate to open house results ───────────────────────────────────
+        if neighborhood.startswith('http'):
+            # User passed a direct Redfin URL — just go there
+            start_url = neighborhood
         else:
-            print('  Open house filter already active')
+            # Build search URL and append open house filter
+            # Tip: search manually on redfin.com, copy the URL, and pass that instead
+            print(f'\nSearching Redfin for: {neighborhood}')
+            page.goto('https://www.redfin.com', wait_until='domcontentloaded')
 
+            search_box = page.locator('input[placeholder*="Search"], #search-box-input').first
+            search_box.wait_for(timeout=12000)
+            search_box.fill(neighborhood)
+            page.wait_for_timeout(1400)
+
+            try:
+                suggestion = page.locator(
+                    '.clickable.suggestion, .autocomplete-suggestion, '
+                    '[role="option"], [role="listbox"] li, .SearchTypeaheadRow'
+                ).first
+                suggestion.wait_for(timeout=4000)
+                suggestion.click()
+            except Exception:
+                search_box.press('Enter')
+
+            page.wait_for_load_state('domcontentloaded')
+            page.wait_for_timeout(2200)
+
+            current_url = page.url
+            if 'open-house' not in current_url:
+                if '/filter/' in current_url:
+                    start_url = current_url.replace('/filter/', '/filter/open-house=anytime,')
+                else:
+                    start_url = current_url.rstrip('/') + '/filter/open-house=anytime'
+            else:
+                start_url = current_url
+
+        print(f'\nGoing to: {start_url}')
+        page.goto(start_url, wait_until='domcontentloaded')
         page.wait_for_timeout(2500)
 
         # ── Scroll to load all cards ─────────────────────────────────────────
