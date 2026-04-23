@@ -226,28 +226,59 @@ def run(neighborhood, slow_mo=0):
         count = scroll_for_cards(page)
         print(f'  Found {count} cards')
 
-        # ── Collect listing URLs ─────────────────────────────────────────────
-        links = page.locator('a[href*="/home/"]').all()
-        seen, listing_urls = set(), []
-        for link in links:
+        # ── Collect listing URLs + open house time from the cards ───────────
+        # The open house time badge ("OPEN SAT, 1PM TO 3PM") lives on the
+        # search result card — grab it here so we don't have to dig for it
+        # on the detail page.
+        cards = page.locator('.HomeCard, [data-rf-test-name="mapHomeCard"]').all()
+        seen, listings = set(), []   # listings = list of {url, open_text}
+
+        for card in cards:
             try:
-                href = link.get_attribute('href', timeout=1000)
-                if href and href not in seen:
-                    seen.add(href)
-                    url = href if href.startswith('http') else 'https://www.redfin.com' + href
-                    listing_urls.append(url)
+                href = card.locator('a[href*="/home/"]').first.get_attribute('href', timeout=1000)
+                if not href or href in seen:
+                    continue
+                seen.add(href)
+                url = href if href.startswith('http') else 'https://www.redfin.com' + href
+
+                # Look for the open house bubble text anywhere inside the card
+                open_text = ''
+                try:
+                    badge = card.locator(
+                        '[class*="open-house" i], [class*="OpenHouse" i], '
+                        '[class*="openHouse" i], [class*="badge" i]'
+                    ).first
+                    if badge.count():
+                        open_text = badge.inner_text(timeout=800).strip()
+                except Exception:
+                    pass
+
+                # Fallback: scan all text in the card for "OPEN" keyword
+                if not open_text:
+                    try:
+                        card_text = card.inner_text(timeout=1000)
+                        for line in card_text.split('\n'):
+                            if 'open' in line.lower() and any(c.isdigit() for c in line):
+                                open_text = line.strip()
+                                break
+                    except Exception:
+                        pass
+
+                listings.append({'url': url, 'open_text': open_text})
             except Exception:
                 pass
 
-        # Shuffle slightly — perfectly sequential requests look robotic
-        random.shuffle(listing_urls)
-        print(f'  Collected {len(listing_urls)} unique listings\n')
+        random.shuffle(listings)
+        print(f'  Collected {len(listings)} unique listings\n')
 
-        # ── Visit each listing ───────────────────────────────────────────────
-        for i, url in enumerate(listing_urls, 1):
-            print(f'[{i}/{len(listing_urls)}] {url}')
+        # ── Visit each listing for agent name ───────────────────────────────
+        for i, listing in enumerate(listings, 1):
+            url       = listing['url']
+            open_text = listing['open_text']
+            print(f'[{i}/{len(listings)}] {url}')
+            if open_text:
+                print(f'  card badge: {open_text}')
 
-            # Occasional longer break every 4-8 listings
             if i > 1 and i % random.randint(4, 8) == 0:
                 long_pause()
 
@@ -256,33 +287,10 @@ def run(neighborhood, slow_mo=0):
                 pause(2.5, 5.0)
                 dismiss_popups(page)
 
-                # Scroll a bit as if reading the page
                 page.evaluate(f'window.scrollTo(0, {random.randint(200, 600)})')
                 pause(0.8, 2.0)
 
                 address = address_from_url(url)
-
-                # Open house date / time
-                # The page has a heading "Open house schedule" then the actual times below it.
-                # We grab the whole section and filter out the heading line.
-                open_date = open_time = ''
-                try:
-                    section_text = page.locator('text=/Open House/i').first.evaluate(
-                        'el => el.closest("section,div,article,li").innerText', timeout=4000
-                    )
-                    lines = [
-                        l.strip() for l in section_text.split('\n')
-                        if l.strip() and 'open house' not in l.strip().lower()
-                    ]
-                    if lines:
-                        oh_line = lines[0]
-                        if '·' in oh_line:
-                            d, t = oh_line.split('·', 1)
-                            open_date, open_time = d.strip(), t.strip()
-                        else:
-                            open_date = oh_line[:80]
-                except Exception:
-                    pass
 
                 # Agent — find "Listed by" text
                 agent_name = ''
@@ -294,16 +302,20 @@ def run(neighborhood, slow_mo=0):
                 except Exception:
                     pass
 
+                # Use the badge text as the open house time
+                open_date = open_text
+                open_time = ''
+
                 row = (address, agent_name, open_date, open_time, url, datetime.now().isoformat())
                 upsert(conn, row)
                 results.append(row)
                 print(f'  address : {address}')
                 print(f'  agent   : {agent_name or "not found"}')
-                print(f'  when    : {open_date} {open_time}\n')
+                print(f'  when    : {open_text or "(not found)"}\n')
 
             except PlaywrightTimeout:
                 print('  Timed out — skipping\n')
-                pause(3, 6)   # back off before next request
+                pause(3, 6)
             except Exception as e:
                 err = str(e)
                 print(f'  Error: {err[:120]}\n')
