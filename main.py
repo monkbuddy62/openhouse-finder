@@ -114,9 +114,9 @@ def run(neighborhood, slow_mo=700):
 
         if 'open-house' not in current_url:
             if '/filter/' in current_url:
-                filtered_url = current_url.replace('/filter/', '/filter/open-house-3day,')
+                filtered_url = current_url.replace('/filter/', '/filter/open-house=anytime,')
             else:
-                filtered_url = current_url.rstrip('/') + '/filter/open-house-3day'
+                filtered_url = current_url.rstrip('/') + '/filter/open-house=anytime'
             print(f'  Navigating to: {filtered_url}')
             page.goto(filtered_url, wait_until='domcontentloaded')
         else:
