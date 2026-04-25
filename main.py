@@ -195,7 +195,7 @@ def run(neighborhood, slow_mo=0, log=print):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=False,
+            headless=True,
             slow_mo=slow_mo,
             args=[
                 '--disable-blink-features=AutomationControlled',
