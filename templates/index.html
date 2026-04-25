@@ -153,7 +153,19 @@
       background: var(--surface);
       border-right: 1px solid var(--border);
       overflow: hidden;
+      transition: width 0.22s ease;
     }
+    #sidebar.collapsed { width: 0; border-right: none; }
+
+    #sidebarToggle {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 0.38rem 0.6rem;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+    }
+    #sidebarToggle:hover { border-color: var(--accent-bdr); color: var(--accent); }
 
     /* Progress log */
     #logWrap {
@@ -373,6 +385,7 @@
 <body>
 
 <div id="topbar">
+  <button id="sidebarToggle" title="Toggle sidebar">◀</button>
   <h1>◈ OPEN HOUSE FINDER</h1>
   <input id="urlInput" type="text" placeholder="Paste Redfin neighborhood URL…" spellcheck="false"/>
   <button id="runBtn">RUN</button>
@@ -401,7 +414,7 @@
     </div>
 
     <div id="routePanel">
-      <input id="homeInput" type="text" placeholder="Your home address…" spellcheck="false"/>
+      <input id="homeInput" type="text" placeholder="Your home address…" spellcheck="false" value="2544 56th Ave SW, Seattle, WA"/>
       <div id="routeActions">
         <button id="planBtn">PLAN ROUTE</button>
         <button id="mapsBtn">OPEN IN MAPS ↗</button>
@@ -790,6 +803,22 @@ planBtn.addEventListener('click', async () => {
 });
 
 mapsBtn.addEventListener('click', () => { if (mapsUrl) window.open(mapsUrl, '_blank'); });
+
+// ── Sidebar toggle ─────────────────────────────────────────────────────────
+const sidebarEl      = document.getElementById('sidebar');
+const sidebarToggle  = document.getElementById('sidebarToggle');
+
+function setSidebarCollapsed(collapsed) {
+  sidebarEl.classList.toggle('collapsed', collapsed);
+  sidebarToggle.textContent = collapsed ? '▶' : '◀';
+  setTimeout(() => map.invalidateSize(), 230);
+}
+
+sidebarToggle.addEventListener('click', () => {
+  setSidebarCollapsed(!sidebarEl.classList.contains('collapsed'));
+});
+
+if (window.innerWidth < 700) setSidebarCollapsed(true);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function setStatus(cls, text) { statusEl.className = cls; statusEl.textContent = text; }
