@@ -227,7 +227,9 @@ def _time_aware_route(home, stops):
     timed, no_time = [], []
     for s in stops:
         s = dict(s)
-        s['_start'], s['_end'] = _parse_open_time(s.get('open_time', ''))
+        s['_start'], s['_end'] = _parse_open_time(s.get('open_time') or '')
+        if s['_start'] is None and s.get('open_time'):
+            print(f"[route] could not parse open_time: {s['open_time']!r}")
         (timed if s['_start'] is not None else no_time).append(s)
 
     route    = []
@@ -285,5 +287,5 @@ def _google_maps_url(home_address, stop_addresses):
 
 
 if __name__ == '__main__':
-    print('Open House Finder running at http://localhost:5000')
-    app.run(debug=False, port=5000, threaded=True)
+    print('Open House Finder running at http://0.0.0.0:5000')
+    app.run(host='0.0.0.0', debug=False, port=5000, threaded=True)
