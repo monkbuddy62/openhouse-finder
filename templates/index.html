@@ -376,6 +376,46 @@
       border: 2px solid rgba(0,0,0,0.5);
     }
 
+    /* Saved routes */
+    #savedSection {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+    }
+    #savedToggle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.45rem 0.7rem;
+      font-size: 0.62rem;
+      letter-spacing: 0.18em;
+      color: var(--text-mute);
+      cursor: pointer;
+      user-select: none;
+    }
+    #savedToggle:hover { color: var(--text-dim); }
+    #savedWrap { display: none; max-height: 220px; overflow-y: auto; }
+    #savedWrap.open { display: block; }
+
+    .saved-row {
+      display: flex;
+      align-items: center;
+      padding: 0.4rem 0.7rem;
+      border-bottom: 1px solid var(--border2);
+      gap: 0.45rem;
+    }
+    .saved-row:hover { background: var(--surface2); }
+    .saved-info { flex: 1; min-width: 0; }
+    .saved-name { font-size: 0.68rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .saved-meta { font-size: 0.6rem; color: var(--text-mute); }
+    .saved-load { background: var(--gold-bg); border: 1px solid var(--gold-bdr); color: var(--gold); font-size: 0.62rem; padding: 0.22rem 0.5rem; }
+    .saved-load:hover { filter: brightness(1.2); }
+    .saved-del  { background: transparent; border: 1px solid var(--border); color: var(--text-mute); font-size: 0.7rem; padding: 0.22rem 0.4rem; }
+    .saved-del:hover  { color: var(--danger); border-color: var(--danger); }
+
+    #saveBtn { background: transparent; border: 1px solid var(--border); color: var(--text-mute); display: none; }
+    #saveBtn:hover { color: var(--text); }
+    #saveBtn.visible { display: block; }
+
     /* Scrollbars */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -417,10 +457,17 @@
       <input id="homeInput" type="text" placeholder="Your home address…" spellcheck="false" value="2544 56th Ave SW, Seattle, WA"/>
       <div id="routeActions">
         <button id="planBtn">PLAN ROUTE</button>
+        <button id="saveBtn">SAVE</button>
         <button id="mapsBtn">OPEN IN MAPS ↗</button>
       </div>
       <div id="routeStatus"></div>
     </div>
+
+    <div id="savedSection">
+      <div id="savedToggle">SAVED ROUTES <span id="savedArrow">▶</span></div>
+      <div id="savedWrap"></div>
+    </div>
+
   </div>
 
   <div id="map"></div>
@@ -724,6 +771,7 @@ function drawRoute(ordered) {
 function clearRoute() {
   routeOrder = [];
   mapsUrl    = '';
+  document.getElementById('saveBtn').classList.remove('visible');
   mapsBtn.classList.remove('visible');
   if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
 }
@@ -795,6 +843,7 @@ planBtn.addEventListener('click', async () => {
   let statusMsg = `Route ready — ${reachable.length} stop${reachable.length !== 1 ? 's' : ''}`;
   if (skipped.length) statusMsg += ` · ${skipped.length} unreachable (time conflict)`;
   routeStatus.textContent = statusMsg;
+  document.getElementById('saveBtn').classList.add('visible');
   mapsBtn.classList.add('visible');
 
   drawRoute(routeData.route);
@@ -803,6 +852,80 @@ planBtn.addEventListener('click', async () => {
 });
 
 mapsBtn.addEventListener('click', () => { if (mapsUrl) window.open(mapsUrl, '_blank'); });
+
+// ── Saved routes ───────────────────────────────────────────────────────────
+const SAVED_KEY = 'openhouse_saved_routes';
+
+function getSaved() {
+  try { return JSON.parse(localStorage.getItem(SAVED_KEY) || '[]'); } catch { return []; }
+}
+function putSaved(routes) { localStorage.setItem(SAVED_KEY, JSON.stringify(routes)); }
+
+document.getElementById('saveBtn').addEventListener('click', () => {
+  if (!routeOrder.length) return;
+  const auto = `${new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} — ${routeOrder.length} stop${routeOrder.length !== 1 ? 's' : ''}`;
+  const name = prompt('Name this route:', auto);
+  if (name === null) return;
+  const stops = routeOrder.map(id => {
+    const l = allListings.find(x => x.id === id);
+    return l ? { id: l.id, address: l.address, open_date: l.open_date, open_time: l.open_time, lat: l.lat, lng: l.lng } : { id };
+  });
+  const routes = getSaved();
+  routes.unshift({ id: Date.now(), name: name || auto, savedAt: new Date().toISOString(), routeOrder: [...routeOrder], mapsUrl, stops });
+  putSaved(routes);
+  renderSavedRoutes();
+  const wrap = document.getElementById('savedWrap');
+  if (!wrap.classList.contains('open')) {
+    wrap.classList.add('open');
+    document.getElementById('savedArrow').textContent = '▼';
+  }
+});
+
+function loadSavedRoute(route) {
+  routeOrder = [...route.routeOrder];
+  mapsUrl    = route.mapsUrl;
+  routeStatus.textContent = `Loaded: ${route.name}`;
+  document.getElementById('saveBtn').classList.add('visible');
+  mapsBtn.classList.add('visible');
+  for (const s of route.stops) {
+    const l = allListings.find(x => x.id === s.id);
+    if (l) { l.lat = l.lat || s.lat; l.lng = l.lng || s.lng; }
+  }
+  drawRoute(route.stops.filter(s => s.lat && s.lng));
+  renderListings();
+  renderMarkers();
+}
+
+function renderSavedRoutes() {
+  const wrap   = document.getElementById('savedWrap');
+  const routes = getSaved();
+  if (!routes.length) { wrap.innerHTML = '<div class="empty-msg">No saved routes.</div>'; return; }
+  wrap.innerHTML = '';
+  for (const route of routes) {
+    const row = document.createElement('div');
+    row.className = 'saved-row';
+    row.innerHTML = `
+      <div class="saved-info">
+        <div class="saved-name">${route.name}</div>
+        <div class="saved-meta">${new Date(route.savedAt).toLocaleDateString()} · ${route.routeOrder.length} stops</div>
+      </div>
+      <button class="saved-load">LOAD</button>
+      <button class="saved-del">✕</button>
+    `;
+    row.querySelector('.saved-load').addEventListener('click', () => loadSavedRoute(route));
+    row.querySelector('.saved-del').addEventListener('click', () => {
+      putSaved(getSaved().filter(r => r.id !== route.id));
+      renderSavedRoutes();
+    });
+    wrap.appendChild(row);
+  }
+}
+
+document.getElementById('savedToggle').addEventListener('click', () => {
+  const open = document.getElementById('savedWrap').classList.toggle('open');
+  document.getElementById('savedArrow').textContent = open ? '▼' : '▶';
+  if (open) renderSavedRoutes();
+});
 
 // ── Sidebar toggle ─────────────────────────────────────────────────────────
 const sidebarEl      = document.getElementById('sidebar');
@@ -825,6 +948,7 @@ function setStatus(cls, text) { statusEl.className = cls; statusEl.textContent =
 
 // ── Init ───────────────────────────────────────────────────────────────────
 loadListings();
+renderSavedRoutes();
 </script>
 </body>
 </html>
