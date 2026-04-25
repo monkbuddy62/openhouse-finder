@@ -157,10 +157,10 @@ def api_route():
     if not stops:
         return jsonify({'error': 'Could not geocode any stops'}), 400
 
-    ordered  = _nearest_neighbor(home, stops)
-    maps_url = _google_maps_url(home['address'], [s['address'] for s in ordered])
+    ordered, n_skipped = _time_aware_route(home, stops)
+    maps_url = _google_maps_url(home['address'], [s['address'] for s in ordered if not s.get('_skipped')])
 
-    return jsonify({'route': ordered, 'maps_url': maps_url})
+    return jsonify({'route': ordered, 'maps_url': maps_url, 'skipped': n_skipped})
 
 
 # ── Geo helpers ───────────────────────────────────────────────────────────────
@@ -191,17 +191,89 @@ def _haversine(a, b):
     return R * 2 * math.asin(math.sqrt(h))
 
 
-def _nearest_neighbor(home, stops):
-    """Nearest-neighbor TSP heuristic — good enough for ~25 stops."""
-    remaining = list(stops)
-    route     = []
-    current   = (home['lat'], home['lng'])
+_AVG_SPEED_KMH = 40   # assumed urban driving speed
+_VISIT_MIN     = 5    # minutes spent at each open house
+
+
+def _parse_open_time(s):
+    """Parse '1–3PM', '10AM–12PM', '1:30–3PM' → (start_min, end_min) from midnight.
+    Returns (None, None) if unparseable."""
+    import re
+    if not s:
+        return None, None
+    s = s.replace('–', '-').replace('—', '-').strip()
+    m = re.match(r'^(\d+(?::\d+)?)\s*(AM|PM)?\s*-\s*(\d+(?::\d+)?)\s*(AM|PM)?$', s, re.IGNORECASE)
+    if not m:
+        return None, None
+    sh, sa, eh, ea = m.groups()
+    ea = (ea or '').upper()
+    sa = (sa or ea).upper()  # start inherits AM/PM from end when absent
+
+    def to_min(h_str, ampm):
+        parts = h_str.split(':')
+        h, mi = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+        if ampm == 'PM' and h != 12:
+            h += 12
+        elif ampm == 'AM' and h == 12:
+            h = 0
+        return h * 60 + mi
+
+    return to_min(sh, sa), to_min(eh, ea)
+
+
+def _time_aware_route(home, stops):
+    """Time-aware route: Earliest Deadline First among reachable stops.
+    Stops with no time info are appended at the end via nearest-neighbor."""
+    timed, no_time = [], []
+    for s in stops:
+        s = dict(s)
+        s['_start'], s['_end'] = _parse_open_time(s.get('open_time', ''))
+        (timed if s['_start'] is not None else no_time).append(s)
+
+    route    = []
+    skipped  = []
+    pos      = (home['lat'], home['lng'])
+    now      = min((s['_start'] for s in timed), default=9 * 60)
+    remaining = list(timed)
+
     while remaining:
-        nearest = min(remaining, key=lambda s: _haversine(current, (s['lat'], s['lng'])))
+        reachable = []
+        for s in remaining:
+            km      = _haversine(pos, (s['lat'], s['lng']))
+            travel  = (km / _AVG_SPEED_KMH) * 60
+            arrival = now + travel
+            if arrival <= s['_end']:
+                reachable.append((s, arrival, travel))
+
+        if not reachable:
+            future = [s for s in remaining if s['_start'] > now]
+            if not future:
+                skipped.extend(remaining)
+                break
+            now = min(s['_start'] for s in future)
+            continue
+
+        # Earliest deadline first; break ties by travel time
+        best, arrival, travel = min(reachable, key=lambda x: (x[0]['_end'], x[2]))
+        best['_skipped'] = False
+        route.append(best)
+        remaining.remove(best)
+        pos = (best['lat'], best['lng'])
+        now = max(arrival, best['_start']) + _VISIT_MIN
+
+    for s in skipped:
+        s['_skipped'] = True
+        route.append(s)
+
+    # No-time stops: nearest-neighbor from wherever the route ends
+    while no_time:
+        nearest = min(no_time, key=lambda s: _haversine(pos, (s['lat'], s['lng'])))
+        nearest['_skipped'] = False
         route.append(nearest)
-        remaining.remove(nearest)
-        current = (nearest['lat'], nearest['lng'])
-    return route
+        no_time.remove(nearest)
+        pos = (nearest['lat'], nearest['lng'])
+
+    return route, len(skipped)
 
 
 def _google_maps_url(home_address, stop_addresses):

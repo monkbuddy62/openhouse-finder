@@ -227,6 +227,8 @@
     .listing-card.excluded { opacity: 0.3; }
     .listing-card.today-hl { border-left-color: var(--accent); }
     .listing-card.routed   { border-left-color: var(--gold); }
+    .listing-card.skipped  { border-left-color: #c0392b; opacity: 0.6; }
+    .card-skip { position: absolute; top: 0.3rem; right: 2rem; font-size: 0.7rem; color: #c0392b; }
 
     .card-when {
       font-size: 0.63rem;
@@ -591,14 +593,16 @@ function renderListings() {
     const isToday  = l.open_date === today;
     const card = document.createElement('div');
     card.className = 'listing-card'
-      + (l.excluded          ? ' excluded' : '')
-      + (isToday             ? ' today-hl' : '')
-      + (routeIdx >= 0       ? ' routed'   : '');
+      + (l.excluded          ? ' excluded'  : '')
+      + (isToday             ? ' today-hl'  : '')
+      + (routeIdx >= 0       ? ' routed'    : '')
+      + (l._skipped          ? ' skipped'   : '');
     card.dataset.id = l.id;
 
     const when = [l.open_date, l.open_time].filter(Boolean).join(' ');
     card.innerHTML = `
       ${routeIdx >= 0 ? `<span class="card-num">#${routeIdx + 1}</span>` : ''}
+      ${l._skipped    ? `<span class="card-skip" title="Couldn't fit in route">⚠</span>` : ''}
       <button class="exclude-btn" title="${l.excluded ? 'Re-include' : 'Exclude'}">${l.excluded ? '↩' : '✕'}</button>
       <div class="card-when">${when || '—'}</div>
       <div class="card-address">${l.address}</div>
@@ -764,15 +768,20 @@ planBtn.addEventListener('click', async () => {
 
   if (routeData.error) { routeStatus.textContent = routeData.error; return; }
 
-  routeOrder = routeData.route.map(s => s.id);
+  const reachable = routeData.route.filter(s => !s._skipped);
+  const skipped   = routeData.route.filter(s =>  s._skipped);
+
+  routeOrder = reachable.map(s => s.id);
   mapsUrl    = routeData.maps_url;
 
   for (const s of routeData.route) {
     const l = allListings.find(x => x.id === s.id);
-    if (l) { l.lat = s.lat; l.lng = s.lng; }
+    if (l) { l.lat = s.lat; l.lng = s.lng; l._skipped = s._skipped; }
   }
 
-  routeStatus.textContent = `Route ready — ${routeOrder.length} stops`;
+  let statusMsg = `Route ready — ${reachable.length} stop${reachable.length !== 1 ? 's' : ''}`;
+  if (skipped.length) statusMsg += ` · ${skipped.length} unreachable (time conflict)`;
+  routeStatus.textContent = statusMsg;
   mapsBtn.classList.add('visible');
 
   drawRoute(routeData.route);
